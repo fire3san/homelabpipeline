@@ -138,9 +138,9 @@ If you are using the app repo template (`templates/homelabdeploy.yml`), the runn
 
 ## ✅ Done — what's next?
 
-You've completed the full pipeline. 🎉
+You've completed the core pipeline. 🎉
 
-➡️ Back to the [README](README.md#-adding-a-new-app) to deploy your first app, or open [`stacks/example-app/docker-compose.yml`](stacks/example-app/docker-compose.yml) as a starting point.
+➡️ **[PrometheusGrafanaPVEExporterSetupGuide.md](PrometheusGrafanaPVEExporterSetupGuide.md)** — set up monitoring, or go straight to the [README](README.md#-adding-a-new-app) to deploy your first app.
 
 ---
 

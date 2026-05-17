@@ -196,12 +196,13 @@ A single source of truth for every port that listens anywhere in the homelab. An
 ```
 homelabpipeline/
 ├── README.md                            ← You are here
-├── deployment-guide.md                   ← Vite/SPA multi-environment base-path guide
+├── DeploymentSetupGuide.md              ← Vite/SPA multi-environment base-path guide
 ├── ProxmoxVMSetupGuide.md               ← Provision the three Ubuntu VMs on Proxmox
 ├── DockerInstallSetupGuide.md           ← Install Docker + create the proxy-network
 ├── TraefikPortainerSetupGuide.md        ← Deploy Portainer + Traefik (auto subfolder routing)
 ├── CloudflareTunnelSetupGuide.md        ← Create the Cloudflare Tunnel + cloudflared
 ├── GitHubRunnerSetupGuide.md            ← Register the self-hosted GitHub runner
+├── PrometheusGrafanaPVEExporterSetupGuide.md ← Set up monitoring with Prometheus, Grafana, and PVE Exporter
 ├── docs/
 │   └── diagrams/
 │       ├── architecture.mmd             ← Mermaid source — Architecture at a glance
@@ -256,7 +257,8 @@ Work through the setup guides in this order. Each one is self-contained and buil
 3. 🚦 **[TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md)** — deploy Portainer and Traefik with automated subfolder routing.
 4. 🔒 **[CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md)** — create the tunnel and run `cloudflared`.
 5. ⚙️ **[GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md)** — deploy the myoung34 GitHub Runner as a Docker container.
-6. ➕ **Add your first app** — see the next section.
+6. 📊 **[PrometheusGrafanaPVEExporterSetupGuide.md](PrometheusGrafanaPVEExporterSetupGuide.md)** — set up Prometheus, Grafana, and PVE Exporter for LAN-only monitoring.
+7. ➕ **Add your first app** — see the next section.
 
 > ⏱️ Tip: take a Proxmox snapshot before each major step. If something breaks, you can roll back in seconds.
 
@@ -271,7 +273,8 @@ Work through the setup guides in this order. Each one is self-contained and buil
 | 3 | [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md) | Portainer install, Traefik stack, dynamic middleware, subfolder routing |
 | 4 | [CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md) | Cloudflare Zero Trust tunnel, wildcard hostname, `cloudflared` as a service |
 | 5 | [GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md) | myoung34 Docker-based runner deployment, token setup, Docker socket mounting |
-| 6 | [deployment-guide.md](deployment-guide.md) | Vite/SPA base-path config for GitHub Pages + Traefik + direct IP access |
+| 6 | [DeploymentSetupGuide.md](DeploymentSetupGuide.md) | Vite/SPA base-path config for GitHub Pages + Traefik + direct IP access |
+| 7 | [PrometheusGrafanaPVEExporterSetupGuide.md](PrometheusGrafanaPVEExporterSetupGuide.md) | Prometheus, Grafana, PVE Exporter — LAN-only monitoring stack |
 
 ---
 
@@ -294,7 +297,7 @@ Use this when an app generates absolute links to `/static/...`, hard-codes URLs,
 3. For **app repos** (with their own Dockerfile), copy [`templates/homelabdeploy.yml`](templates/homelabdeploy.yml) into `.github/workflows/` in that repo.
 4. Visit your new URL and confirm Traefik routes the request.
 
-> **SPA apps:** If your app is a Vite/React SPA that needs to work behind a subfolder path, follow the [deployment guide](deployment-guide.md) to configure `base` path, nginx aliases, and Traefik labels correctly.
+> **SPA apps:** If your app is a Vite/React SPA that needs to work behind a subfolder path, follow the [deployment guide](DeploymentSetupGuide.md) to configure `base` path, nginx aliases, and Traefik labels correctly.
 
 **Minimum Docker labels** for a subfolder-routed app:
 

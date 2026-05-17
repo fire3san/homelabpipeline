@@ -8,7 +8,7 @@
 # IMPORTANT: If your app is a Vite/SPA that hard-codes asset paths at build time,
 # the StripPrefix middleware alone is NOT enough — you must also set `VITE_BASE_PATH`
 # in the Dockerfile so the browser requests assets from the correct subfolder path.
-# See deployment-guide.md for the full checklist.
+# See DeploymentSetupGuide.md for the full checklist.
 
 services:
   example-app:
