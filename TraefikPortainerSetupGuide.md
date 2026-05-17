@@ -118,6 +118,51 @@ networks:
     external: true
 ```
 
+## Step 5: Routing Patterns — Subfolder vs Subdomain
+Traefik supports two ways to expose an app, and you can mix them freely in the same homelab.
+
+### Pattern A — Subfolder routing (the default in this guide)
+Each app lives under a path prefix, e.g. `https://yourdomain.com/test-app`.
+
+* No DNS changes per app — Cloudflare's `*` wildcard hostname already covers everything.
+* The `defaultRule` in Step 3 auto-generates `Host(...) && PathPrefix(/<service-name>)`.
+* The `auto-strip-prefix@file` middleware (Step 2) removes the prefix before the request reaches the container, so the container only sees `/`.
+
+> ⚠️ Some apps generate **absolute** URLs (`/static/...`, `/api/...`) that ignore the path prefix. They will load but break their own assets. Use Pattern B for those apps.
+
+### Pattern B — Subdomain routing
+Each app gets its own hostname, e.g. `https://app.yourdomain.com`.
+
+You **override** the `defaultRule` per-container with explicit labels:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+
+  # Override the defaultRule with a Host match. NO PathPrefix → no stripping needed.
+  - "traefik.http.routers.test-app.rule=Host(`app.yourdomain.com`)"
+  - "traefik.http.routers.test-app.entrypoints=web"
+
+  - "traefik.http.services.test-app.loadbalancer.server.port=80"
+```
+
+Requirements for Pattern B:
+
+* Your Cloudflare Tunnel must serve `*.yourdomain.com` (the wildcard hostname from [CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md) already does this).
+* Do **not** attach `auto-strip-prefix@file` — there's no path to strip.
+
+### When to use which
+
+| Use subfolder when… | Use subdomain when… |
+|---------------------|----------------------|
+| The app respects a path prefix (or its assets are relative). | The app generates absolute URLs you can't rewrite. |
+| You want one short URL to remember. | You want app-level isolation (cookies, CORS, OAuth callbacks). |
+| You don't want to manage per-app DNS. | The app needs its own root path (e.g. `/`, `/api`, `/login`). |
+
+Working compose files for both patterns live in:
+* [`stacks/example-app/docker-compose.yml`](stacks/example-app/docker-compose.yml) — subfolder variant.
+* [`stacks/example-app-host/docker-compose.yml`](stacks/example-app-host/docker-compose.yml) — subdomain variant.
+
 ## 🛠️ Troubleshooting Checklist
 If you get a **404 Page Not Found**:
 1. **Check the Traefik Dashboard:** Go to `http://<YOUR-SERVER-IP>:8080/dashboard/`. Check the **Routers** tab. If your app isn't listed, Traefik can't see it.

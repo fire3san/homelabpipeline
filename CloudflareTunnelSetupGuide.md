@@ -97,6 +97,12 @@ Still on the tunnel page, switch to the **Public Hostname** tab and click **Add 
 
 This catches **everything** — `yourdomain.com`, `app1.yourdomain.com`, `anything.yourdomain.com` — and forwards it to Traefik on the LAN. Traefik then decides which container handles which path.
 
+> 🧭 **Subfolder vs subdomain — both work with this same wildcard:**
+> - Subfolder: `yourdomain.com/myapp` → matched by Traefik's `defaultRule` + `PathPrefix(/myapp)`.
+> - Subdomain: `myapp.yourdomain.com` → matched by a per-container `Host(\`myapp.yourdomain.com\`)` rule.
+>
+> You do **not** need to add new Cloudflare hostnames per app; the `*` wildcard covers both patterns. See [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md) "Routing Patterns" for the Traefik-side configuration.
+
 ### Option B — Root + wildcard (some setups require both)
 
 Add two entries: one with subdomain blank (root) and one with `*`, both pointing to the same `192.168.1.12:80`.
