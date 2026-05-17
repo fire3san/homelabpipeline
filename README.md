@@ -22,9 +22,10 @@ If you are new to homelabbing, reverse proxies, or self-hosted CI/CD, don't worr
 8. [Getting started](#-getting-started)
 9. [Setup guides](#-setup-guides)
 10. [Adding a new app](#-adding-a-new-app)
-11. [Security & zero-trust rationale](#-security--zero-trust-rationale)
-12. [Troubleshooting](#%EF%B8%8F-troubleshooting)
-13. [Glossary](#-glossary)
+11. [Monitoring](#-monitoring)
+12. [Security & zero-trust rationale](#-security--zero-trust-rationale)
+13. [Troubleshooting](#%EF%B8%8F-troubleshooting)
+14. [Glossary](#-glossary)
 
 ---
 
@@ -36,6 +37,7 @@ This is a **fully automated homelab deployment pipeline** with two halves:
 |------|---------|-------|
 | **CI/CD pipeline** | Turns code commits into running Docker containers, with no manual `ssh` or `docker build` steps. | GitHub Actions, Runner (myoung34), Portainer |
 | **Traffic pipeline** | Exposes those containers to the public internet **without opening any inbound ports**, using a Cloudflare Tunnel and a Traefik reverse proxy. | Cloudflare Zero Trust, `cloudflared`, Traefik v3 |
+| **Monitoring stack** | Collects and visualises metrics from Proxmox, Traefik, and Docker — LAN-only, never exposed to the internet. | Prometheus, Grafana, PVE Exporter |
 
 The whole thing runs on a single Proxmox host split into purpose-built VMs, so each component is isolated and easy to rebuild.
 
@@ -68,9 +70,11 @@ flowchart LR
             Runner["🏃 GitHub Runner<br/>(myoung34 container)"]
             Portainer["🔲 Portainer"]
             Traefik["🚦 Traefik"]
+            Monitoring["📊 Prometheus +<br/>Grafana + PVE Exporter"]
             Apps["📦 Apps"]
         end
         Tunnel["🔒 VM: cloudflared<br/>Tunnel client"]
+        PVE["🖥️ Proxmox VE<br/>(API :8006)"]
     end
 
     Claw -- "git push" --> GH
@@ -79,6 +83,8 @@ flowchart LR
     CF -- "outbound tunnel" --> Tunnel
     Tunnel --> Traefik
     Traefik --> Apps
+    Monitoring -- "scrape :9221" --> PVE
+    Monitoring -- "scrape :8080" --> Traefik
 ```
 
 **Key idea:** all arrows entering the homelab are **outbound-initiated** by the homelab itself. The router never sees an inbound connection request.
@@ -113,6 +119,7 @@ flowchart TB
                 RUN["🏃 GitHub Runner<br/>(myoung34)"]
                 TRA["🚦 Traefik<br/>proxy-network"]
                 POR["🔲 Portainer"]
+                MON["📊 Monitoring<br/>Prometheus·Grafana·PVE"]
                 APP1["📦 App 1<br/>proxy-network"]
                 APP2["📦 App 2<br/>proxy-network"]
             end
@@ -125,6 +132,8 @@ flowchart TB
     VMT -- "HTTP :80 (LAN only)" --> TRA
     TRA --> APP1
     TRA --> APP2
+    MON -- "scrape :8080" --> TRA
+    MON -- "scrape PVE :9221" --> VMD
 
     VMC -- "git push (outbound 443)" --> GHC
     RUN -- "runner poll (outbound 443)" --> GHC
@@ -145,6 +154,8 @@ flowchart TB
 | Cloudflare ↔ `cloudflared` VM | Outbound **only** (initiated by `cloudflared`) | The tunnel is the *only* path from the public internet into the homelab. |
 | `cloudflared` ↔ `docker-ubuntu` | LAN, port 80 | Plain HTTP is fine here — TLS is terminated at Cloudflare and the LAN is trusted. |
 | `docker-ubuntu` ↔ `proxy-network` | Docker bridge | Containers talk to each other only through this bridge. |
+| `docker-ubuntu` ↔ Proxmox API | LAN, port 8006 | PVE Exporter scrapes Proxmox metrics over the LAN. Token-based auth only. |
+| Monitoring containers ↔ `docker-ubuntu` | Docker bridge | Prometheus scrapes Traefik (`:8080`) and PVE Exporter (`:9221`) internally. |
 | Admin laptop ↔ VMs | LAN, port 22 / 9443 | SSH key auth; management UIs are LAN-only. |
 
 ---
@@ -211,13 +222,14 @@ flowchart TD
 | Container UI | **Portainer CE** | Manages stacks, networks, volumes through a web UI. | One-click stack redeploys; great for ops while learning. |
 | Reverse proxy | **Traefik v3** | Routes HTTP traffic to containers by labels; strips path prefixes. | Auto-discovers containers — no per-app proxy config to maintain. |
 | Network security | **Cloudflare Zero Trust** + `cloudflared` | Outbound-only tunnel from LAN to Cloudflare edge. | No port forwarding, free TLS, DDoS protection, optional Access policies. |
+| Monitoring | **Prometheus + Grafana** | Prometheus scrapes metrics; Grafana visualises them on dashboards. PVE Exporter translates the Proxmox API for Prometheus. | LAN-only; all three containers have `traefik.enable=false`. |
 
 ### VM responsibilities
 
 | VM | Network | Role | Inbound ports needed |
 |----|---------|------|----------------------|
 | `openclaw-ubuntu` | LAN only | Runs the AI coding agent. | None (uses SSH + git outbound) |
-| `docker-ubuntu` | LAN only | Hosts Docker, Portainer, Traefik, all app containers, and the GitHub Runner container. | `:80` from `cloudflared` only; `:9443` Portainer & `:8080` Traefik dashboard on LAN |
+| `docker-ubuntu` | LAN only | Hosts Docker, Portainer, Traefik, monitoring (Prometheus/Grafana/PVE Exporter), all app containers, and the GitHub Runner container. | `:80` from `cloudflared` only; `:9443` Portainer, `:8080` Traefik, `:9090` Prometheus, `:3030` Grafana on LAN |
 | `cloudflared` | LAN only | Runs the tunnel client. | None — all traffic is outbound to Cloudflare |
 
 ---
@@ -235,6 +247,9 @@ A single source of truth for every port that listens anywhere in the homelab. An
 | `9443` | TCP | `docker-ubuntu` → Portainer container | Portainer Web UI (HTTPS) | LAN only | Self-signed cert; access via `https://<docker-ubuntu>:9443`. |
 | `8000` | TCP | `docker-ubuntu` → Portainer container | Portainer Edge agent tunnel | LAN only | Optional; only needed if you use Edge agents. |
 | `8081+` | TCP | `docker-ubuntu` → app containers | Per-app LAN bypass | LAN only (optional) | Handy for local testing/safety net; not required for the public flow. |
+| `9090` | TCP | `docker-ubuntu` → Prometheus container | Prometheus Web UI | LAN only | Metrics browser; not exposed via tunnel. |
+| `3030` | TCP | `docker-ubuntu` → Grafana container | Grafana Dashboards | LAN only | Mapped from container 3000; not exposed via tunnel. |
+| `9221` | TCP | `docker-ubuntu` → PVE Exporter container | Proxmox metrics endpoint | Docker internal only | Scraped by Prometheus over `proxy-network`; no host port mapping needed. |
 | `*/443` | TCP | `cloudflared` VM → Cloudflare | Outbound tunnel | Outbound to internet | The only sustained connection leaving the homelab to the public internet. |
 | `*/443` | TCP | GitHub Runner container → GitHub | Job polling | Outbound to internet | HTTPS poll; no inbound rule needed. |
 
@@ -268,8 +283,13 @@ homelabpipeline/
     │   └── docker-compose.yml           ← Subfolder routing variant (yourdomain.com/example-app)
     ├── example-app-host/
     │   └── docker-compose.yml           ← Per-host routing variant (app.yourdomain.com)
-    └── github-runner/
-        └── docker-compose.yml           ← myoung34 GitHub Actions runner (Docker-based)
+    ├── github-runner/
+    │   └── docker-compose.yml           ← myoung34 GitHub Actions runner (Docker-based)
+    └── monitoring/
+        ├── docker-compose.yml           ← Prometheus + Grafana + PVE Exporter
+        └── config/
+            ├── prometheus.yml           ← Prometheus scrape targets
+            └── pve.yml                  ← Proxmox API token config (template)
 ```
 
 > 💡 Keep the root directory navigable — one folder per concern, one guide per major component.
@@ -349,6 +369,44 @@ No DNS changes, no Cloudflare changes, no Traefik config edits.
 
 ---
 
+## 📊 Monitoring
+
+The homelab includes a **LAN-only monitoring stack** that collects and visualises metrics from Proxmox, Traefik, and Docker. It is **never exposed to the internet** — all three containers have `traefik.enable=false`.
+
+### What's monitored
+
+| Target | Port | Metrics collected |
+|--------|------|-------------------|
+| Proxmox VE | `:9221` (via PVE Exporter) | CPU, RAM, disk, VM status, network I/O per VM |
+| Traefik | `:8080` (metrics endpoint) | Request count, latency, error rates per router/service |
+| Prometheus (self) | `:9090` | Scrape health, rule evaluation, target discovery |
+
+### Accessing dashboards
+
+- **Grafana:** `http://<docker-ubuntu>:3030` (default login: `admin` / `admin`, change on first login)
+- **Prometheus targets:** `http://<docker-ubuntu>:9090/targets`
+
+Both are reachable only from the LAN — there is no Cloudflare Tunnel hostname pointing at them.
+
+### Setup notes
+
+1. Copy the config files from `stacks/monitoring/config/` to `/home/ubuntu/prometheus/` on the host.
+2. Edit `pve.yml` with your Proxmox API token. **Important:** when creating the token in Proxmox, unchecking "Privilege Separation" is easiest. If you leave it checked, you **must** also add a Token Permission row at Datacenter → Permissions → Add → Token Permission targeting `user@pve!tokenid`.
+3. Create the data directories: `mkdir -p /home/ubuntu/prometheus/data /home/ubuntu/grafana/data`.
+4. Deploy the stack via Portainer or `docker compose up -d`.
+
+### Known pitfalls
+
+| Pitfall | Symptom | Fix |
+|---------|----------|-----|
+| Tab characters in `prometheus.yml` | `Error loading config: did not find expected key` | Replace all tabs with spaces. Run `echo "set tabstospaces" >> ~/.nanorc` to prevent this. |
+| PVE token has Privilege Separation | `403 Forbidden` from PVE Exporter | Add a Token Permission row in Proxmox for `user@pve!tokenid`. |
+| Port 3000 conflict | Grafana fails to start with bind error | Host port is mapped to `3030:3000` to avoid conflicts. Access on port 3030. |
+| Docker DNS failure | `lookup prometheus on 127.0.0.11:53: server misbehaving` | The target container was in a crash loop. Fix the config and restart. |
+| Grafana "no data" | Empty dashboards | Verify the data source URL is `http://prometheus:9090` (Docker DNS), not `localhost`. |
+
+---
+
 ## 🔐 Security & zero-trust rationale
 
 ### What "zero-trust ingress" means here
@@ -367,7 +425,7 @@ This project uses a **zero-trust ingress** model instead:
 
 - All app containers and Traefik share a dedicated `proxy-network` Docker bridge — they can only talk to each other through Traefik.
 - The Docker socket is mounted **read-only** into Traefik (`/var/run/docker.sock:/var/run/docker.sock:ro`) so a compromised Traefik can read labels but cannot create containers.
-- Portainer's web UI (`:9443`) and the Traefik dashboard (`:8080`) are **LAN-only** — never exposed via the tunnel.
+- Portainer's web UI (`:9443`), the Traefik dashboard (`:8080`), Grafana (`:3030`), and Prometheus (`:9090`) are **LAN-only** — never exposed via the tunnel.
 
 ### Things to keep in mind
 
@@ -390,6 +448,9 @@ This project uses a **zero-trust ingress** model instead:
 | 🔁 Stack redeploys but URL still 404s | Confirm the compose **service name** matches the `traefik.http.routers.<name>` label, and that the container is on `proxy-network` (not the default stack network). |
 | 🔑 `permission denied` on `/var/run/docker.sock` | Container needs to be in the `docker` group on the host, or mount the socket explicitly. |
 | 🐢 Build runs but is very slow | Check disk space on `docker-ubuntu` (`df -h`). Old image layers fill up `/var/lib/docker` fast — prune with `docker system prune -af` when safe. |
+| 📊 Prometheus target is **DOWN** | Check that the scrape target uses the Docker service name (e.g. `pve-exporter:9221`) not `localhost` inside the container. Verify `prometheus.yml` has no Tab characters (spaces only). |
+| 🔑 PVE Exporter returns **403 Forbidden** | The Proxmox API token has Privilege Separation enabled. You must add a Token Permission row at Datacenter → Permissions targeting `user@pve!tokenid`. See `stacks/monitoring/config/pve.yml`. |
+| 📈 Grafana shows **no data** | Confirm Grafana's data source points to `http://prometheus:9090` (Docker DNS, not `localhost`). Check that Prometheus targets are UP at `http://<docker-ubuntu>:9090/targets`. |
 
 > 📘 For a deeper Traefik-specific checklist, see the **Troubleshooting Checklist** at the bottom of [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md).
 
@@ -403,6 +464,7 @@ This project uses a **zero-trust ingress** model instead:
 - **Cloudflare Tunnel** — an outbound-only persistent connection from your network to Cloudflare's edge, replacing port forwarding.
 - **Zero-trust** — a security model where no network location is implicitly trusted; every request is authenticated/authorised.
 - **`proxy-network`** — the named Docker bridge network that connects Traefik to all app containers.
+- **PVE Exporter** — a Prometheus exporter that translates the Proxmox VE API into Prometheus-format metrics. Requires an API token with explicit Token Permission.
 
 ---
 

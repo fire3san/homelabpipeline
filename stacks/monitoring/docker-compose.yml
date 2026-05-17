@@ -1,0 +1,63 @@
+# Monitoring stack — Prometheus + Grafana + PVE Exporter
+#
+# - Prometheus scrapes metrics from configured targets every 15s
+# - Grafana visualises those metrics on dashboards (LAN-only on port 3030)
+# - PVE Exporter translates the Proxmox API into Prometheus-format metrics
+#
+# All three containers sit on proxy-network but are NOT exposed via Traefik
+# (traefik.enable=false) — they are accessible only from the LAN.
+#
+# Setup:
+#   1. Copy config/prometheus.yml and config/pve.yml to /home/ubuntu/prometheus/ on the host
+#   2. Edit pve.yml with your Proxmox API token (see config/pve.yml for instructions)
+#   3. Create /home/ubuntu/prometheus/data and /home/ubuntu/grafana/data on the host
+#   4. docker compose up -d
+#   5. Open http://<docker-ubuntu>:3030 in a browser to access Grafana
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=2GB'
+    volumes:
+      - /home/ubuntu/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /home/ubuntu/prometheus/data:/prometheus
+    networks:
+      - proxy-network
+    labels:
+      - "traefik.enable=false"
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    restart: always
+    ports:
+      - "3030:3000"
+    volumes:
+      - /home/ubuntu/grafana/data:/var/lib/grafana
+    networks:
+      - proxy-network
+    labels:
+      - "traefik.enable=false"
+
+  pve-exporter:
+    image: prompve/prometheus-pve-exporter:latest
+    container_name: pve-exporter
+    restart: always
+    volumes:
+      - /home/ubuntu/prometheus/pve.yml:/etc/prometheus/pve.yml:ro
+    networks:
+      - proxy-network
+    labels:
+      - "traefik.enable=false"
+
+networks:
+  proxy-network:
+    external: true

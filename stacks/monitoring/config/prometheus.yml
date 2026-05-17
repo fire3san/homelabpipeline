@@ -1,0 +1,26 @@
+# Prometheus configuration
+#
+# - Scrapes targets every 15 seconds by default
+# - PVE Exporter target uses the Docker service name (pve-exporter:9221)
+# - Traefik target uses the Docker service name (traefik:8080)
+# - Add more scrape configs as you deploy more services
+#
+# IMPORTANT: Prometheus strictly rejects Tab characters.
+# If you edit this file with nano, ensure tabstospaces is enabled:
+#   echo "set tabstospaces" >> ~/.nanorc
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'pve-exporter'
+    static_configs:
+      - targets: ['pve-exporter:9221']
+
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8080']

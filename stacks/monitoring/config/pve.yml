@@ -1,0 +1,20 @@
+# Proxmox VE Exporter configuration
+#
+# - Create a Proxmox API token at Datacenter -> Permissions -> API Tokens
+# - IMPORTANT: When creating the token, the "Privilege Separation" checkbox
+#   creates a token with ZERO rights by default. You MUST also add a
+#   Token Permission row at Datacenter -> Permissions -> Add -> Token Permission
+#   targeting the user@realm!tokenid string, or the exporter will receive
+#   403 Forbidden on every request.
+# - Replace the placeholder values below before deploying.
+
+default:
+  user: prometheus@pve
+  password:               # leave empty if using an API token
+  verify_ssl: false
+
+# If using an API token (recommended):
+# default:
+#   user: prometheus@pve!monitoring
+#   token: your-api-token-here
+#   verify_ssl: false
