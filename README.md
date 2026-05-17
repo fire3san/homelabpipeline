@@ -54,38 +54,59 @@ The whole thing runs on a single Proxmox host split into purpose-built VMs, so e
 
 ```mermaid
 flowchart LR
-    subgraph Cloud["☁️ Cloudflare Edge"]
-        CF["*.yourdomain.com<br/>Wildcard DNS + Tunnel"]
+    subgraph Internet["🌐  Public Internet"]
+        User["👤  End user"]
+        GH["🐙  GitHub<br/>Repo + Actions"]
     end
 
-    subgraph Internet["🌍 Public Internet"]
-        User["👤 End user"]
-        GH["🐙 GitHub<br/>(repo + Actions)"]
+    subgraph Cloud["☁️  Cloudflare Edge"]
+        CF["✦  *.yourdomain.com<br/>Wildcard DNS + Tunnel"]
     end
 
-    subgraph Homelab["🏠 Proxmox Host (LAN)"]
+    subgraph Homelab["🏠  Proxmox Host — LAN"]
         direction TB
-        Claw["🤖 VM: openclaw-ubuntu<br/>AI coding agent"]
-        subgraph DockerVM["⚙️ VM: docker-ubuntu"]
-            Runner["🏃 GitHub Runner<br/>(myoung34 container)"]
-            Portainer["🔲 Portainer"]
-            Traefik["🚦 Traefik"]
-            Monitoring["📊 Prometheus +<br/>Grafana + PVE Exporter"]
-            Apps["📦 Apps"]
+        Claw["🤖  openclaw-ubuntu<br/>AI coding agent"]
+        subgraph DockerVM["⚙️  docker-ubuntu"]
+            Runner["🏃  GitHub Runner<br/>(myoung34)"]
+            Portainer["🔲  Portainer"]
+            Traefik["🚦  Traefik v3"]
+            Monitoring["📊  Monitoring<br/>Prometheus · Grafana · PVE"]
+            Apps["📦  Apps"]
         end
-        Tunnel["🔒 VM: cloudflared<br/>Tunnel client"]
-        PVE["🖥️ Proxmox VE<br/>(API :8006)"]
+        Tunnel["🔒  cloudflared VM<br/>Tunnel client"]
+        PVE["🖥️  Proxmox VE<br/>API :8006"]
     end
 
-    Claw -- "git push" --> GH
-    GH -. "queue job (outbound poll)" .-> Runner
-    User --> CF
-    CF -- "outbound tunnel" --> Tunnel
-    Tunnel --> Traefik
-    Traefik --> Apps
+    Claw   -- "① git push" --> GH
+    GH     -. "② poll job (outbound)" .-> Runner
+    User   -- "③ request" --> CF
+    CF     -- "④ tunnel (TLS)" --> Tunnel
+    Tunnel -- "⑤ HTTP :80" --> Traefik
+    Traefik -- "⑥ route" --> Apps
     Monitoring -- "scrape :9221" --> PVE
     Monitoring -- "scrape :8080" --> Traefik
+
+    classDef internet   fill:#FFF9C4,stroke:#F57F17,stroke-width:2px,color:#E65100
+    classDef cloud      fill:#BBDEFB,stroke:#1565C0,stroke-width:2px,color:#0D47A1
+    classDef docker     fill:#FFE0B2,stroke:#EF6C00,stroke-width:2px,color:#BF360C
+    classDef gateway    fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
+    classDef monitor    fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#004D40
+    classDef proxmox    fill:#C8E6C9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
+
+    class User,GH internet
+    class CF cloud
+    class Runner,Portainer,Apps docker
+    class Traefik,Tunnel gateway
+    class Monitoring monitor
+    class Claw,PVE proxmox
+
+    style Internet fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#5D4037
+    style Cloud    fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#0D47A1
+    style Homelab  fill:#F1F8E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+    style DockerVM fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px,color:#BF360C
 ```
+
+> **Color key:** 🟡 Public internet · 🔵 Cloudflare · 🟢 Proxmox/infra · 🟠 Docker services · 🟣 Gateways (Traefik, cloudflared) · 🟢 Monitoring
 
 **Key idea:** all arrows entering the homelab are **outbound-initiated** by the homelab itself. The router never sees an inbound connection request.
 
@@ -97,54 +118,81 @@ This diagram shows the **logical** layout of the home network — devices, subne
 
 ```mermaid
 flowchart TB
-    subgraph WAN["🌍 Public Internet — UNTRUSTED"]
+    subgraph WAN["🔴  Public Internet — UNTRUSTED"]
         direction LR
-        U["👤 End users"]
-        CFE["☁️ Cloudflare Edge<br/>(yourdomain.com)"]
-        GHC["🐙 GitHub.com"]
+        U["👤  End users"]
+        CFE["☁️  Cloudflare Edge<br/>(yourdomain.com)"]
+        GHC["🐙  GitHub.com"]
     end
 
-    ISP["📶 ISP modem/router<br/>(NAT, no inbound port-forwards)"]
+    ISP["📶  ISP modem / router<br/>NAT · no inbound port-forwards"]
 
-    subgraph LAN["🏠 Home LAN — TRUSTED — 192.168.1.0/24"]
+    subgraph LAN["🟢  Home LAN — TRUSTED — 192.168.1.0/24"]
         direction TB
-        Admin["💻 Admin laptop<br/>(SSH + Portainer UI)"]
-        subgraph PROX["🖥️ Proxmox VE host — 192.168.1.10"]
+        Admin["💻  Admin laptop<br/>SSH + Portainer UI"]
+        subgraph PROX["🖥️  Proxmox VE — 192.168.1.10"]
             direction TB
-            VMC["🤖 openclaw-ubuntu<br/>192.168.1.11"]
-            VMD["⚙️ docker-ubuntu<br/>192.168.1.12"]
-            VMT["🔒 cloudflared<br/>192.168.1.13"]
-            subgraph DOCK["🐳 Docker on docker-ubuntu — 172.18.0.0/16"]
+            VMC["🤖  openclaw-ubuntu<br/>192.168.1.11"]
+            VMD["⚙️  docker-ubuntu<br/>192.168.1.12"]
+            VMT["🔒  cloudflared<br/>192.168.1.13"]
+            subgraph DOCK["🐳  Docker — 172.18.0.0/16"]
                 direction LR
-                RUN["🏃 GitHub Runner<br/>(myoung34)"]
-                TRA["🚦 Traefik<br/>proxy-network"]
-                POR["🔲 Portainer"]
-                MON["📊 Monitoring<br/>Prometheus·Grafana·PVE"]
-                APP1["📦 App 1<br/>proxy-network"]
-                APP2["📦 App 2<br/>proxy-network"]
+                RUN["🏃  GitHub Runner<br/>(myoung34)"]
+                TRA["🚦  Traefik<br/>proxy-network"]
+                POR["🔲  Portainer"]
+                MON["📊  Monitoring<br/>Prometheus · Grafana · PVE"]
+                APP1["📦  App 1<br/>proxy-network"]
+                APP2["📦  App 2<br/>proxy-network"]
             end
             VMD --- DOCK
         end
     end
 
     U --> CFE
-    CFE -. "outbound tunnel (TLS, persistent)" .-> VMT
-    VMT -- "HTTP :80 (LAN only)" --> TRA
+    CFE -. "outbound tunnel (TLS)" .-> VMT
+    VMT -- "HTTP :80 (LAN)" --> TRA
     TRA --> APP1
     TRA --> APP2
     MON -- "scrape :8080" --> TRA
-    MON -- "scrape PVE :9221" --> VMD
+    MON -- "scrape :9221" --> VMD
 
     VMC -- "git push (outbound 443)" --> GHC
     RUN -- "runner poll (outbound 443)" --> GHC
 
-    Admin -- "SSH :22 / HTTPS :9443" --> VMD
+    Admin -- "SSH :22 / Portainer :9443" --> VMD
     Admin -- "SSH :22" --> VMC
     Admin -- "SSH :22" --> VMT
 
     LAN --- ISP
     ISP --- WAN
+
+    classDef untrusted    fill:#FFCDD2,stroke:#C62828,stroke-width:2px,color:#B71C1C
+    classDef isp          fill:#ECEFF1,stroke:#546E7A,stroke-width:2px,color:#37474F
+    classDef admin        fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#0D47A1
+    classDef lanvm        fill:#DCEDC8,stroke:#558B2F,stroke-width:2px,color:#33691E
+    classDef cloudflared  fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
+    classDef dockersvc    fill:#FFE0B2,stroke:#EF6C00,stroke-width:2px,color:#BF360C
+    classDef gateway      fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
+    classDef monitor      fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#004D40
+    classDef apps         fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#F57F17
+
+    class U,CFE,GHC untrusted
+    class ISP isp
+    class Admin admin
+    class VMC,VMD lanvm
+    class VMT cloudflared
+    class RUN,POR dockersvc
+    class TRA gateway
+    class MON monitor
+    class APP1,APP2 apps
+
+    style WAN   fill:#FFEBEE,stroke:#C62828,stroke-width:2px,color:#B71C1C
+    style LAN   fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
+    style PROX  fill:#F1F8E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+    style DOCK  fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px,color:#BF360C
 ```
+
+> **Color key:** 🔴 Untrusted zone · 🟢 Trusted LAN · 🟣 Gateways (Traefik, cloudflared) · 🟠 Docker services · 🟡 Apps · 🔵 Admin · ⚪ ISP boundary
 
 ### Trust boundaries
 
@@ -175,7 +223,7 @@ flowchart TD
     G --> H["✅ Container running on<br/>proxy-network"]
 ```
 
-**How it works (plain English):**
+**How it works:**
 
 1. The AI agent commits application code, a `Dockerfile`, and a `docker-compose.yml` to this repo.
 2. GitHub Actions sees the new commit and queues a deployment job tagged `runs-on: self-hosted`.
@@ -234,7 +282,7 @@ flowchart TD
 
 ---
 
-## � Port usage
+## 🔌 Port usage
 
 A single source of truth for every port that listens anywhere in the homelab. Anything not listed here should **not** be open.
 
