@@ -1,7 +1,3 @@
-traefik_portainer_setup_guide.md
-第
-頁，共 1 頁
-
 # Complete Traefik & Portainer Setup Guide (Automated Subfolder Routing)
 
 This guide details how to set up Traefik as a reverse proxy using Portainer, routing traffic through a Cloudflare tunnel automatically to Docker containers using subfolder paths (e.g., `domain.com/app`).
@@ -88,7 +84,7 @@ networks:
   proxy-network:
     external: true
 ```
-*Note: We hardcoded `yourdomain.com` here to avoid Portainer variable parsing issues.*
+*Note: Ensure you add the Environment Variable `DOMAINNAME` = `yourdomain.com` in Portainer before deploying.*
 
 ## Step 4: Deploying an App
 Because Traefik handles the heavy lifting, deploying an app is incredibly simple. Create a new stack for your app.
@@ -127,6 +123,4 @@ If you get a **404 Page Not Found**:
 1. **Check the Traefik Dashboard:** Go to `http://<YOUR-SERVER-IP>:8080/dashboard/`. Check the **Routers** tab. If your app isn't listed, Traefik can't see it.
 2. **Check the Docker Socket:** Look at Traefik's logs in Portainer. If you see `"client version is too old"`, update the Traefik image. If you see `"permission denied"`, ensure Traefik has read access to `/var/run/docker.sock`.
 3. **Check Router Names:** When using automated rules, Traefik names the router after the service. Ensure your middleware label perfectly matches the service name (e.g., `traefik.http.routers.<SERVICE_NAME>.middlewares`).
-4. **Check Variables:** If Portainer mangles the `${DOMAINNAME}` variable, hardcode your domain directly into the `defaultRule` inside the Traefik stack.
-
-正在顯示traefik_portainer_setup_guide.md。
+4. **Check Variables:** If Portainer mangles the `${DOMAINNAME}` variable, you might need to temporarily hardcode your domain directly into the `defaultRule` inside the Traefik stack to isolate the issue.
