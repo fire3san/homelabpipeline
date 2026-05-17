@@ -1,46 +1,34 @@
 name: Zero Touch Homelab Deployment
 
-# ==========================================================================
-# This workflow is designed for APP REPOS — each app has its own GitHub repo
-# with a Dockerfile and docker-compose.yml at the root.
+# ================================================
+# Zero Touch Homelab Deployment Template
+# ================================================
 #
-# It does NOT apply to this infra repo (homelabpipeline). For infra-only
-# changes, use the deploy.yml workflow which handles stacks/ paths.
+# This template works for BOTH public and private repositories.
 #
-# How it works:
-#   1. Builds a Docker image locally on the self-hosted runner
-#   2. Registers (or updates) a Portainer stack pointing at the app repo
-#   3. Portainer pulls the compose file and redeploys
+# How to use:
+# 1. Public repo  → use the PUBLIC version below (RepositoryAuthentication: false)
+# 2. Private repo → use the PRIVATE REPO VERSION below (RepositoryAuthentication: true + GIT secrets)
 #
-# Required GitHub Secrets:
-#   - PORTAINER_URL   e.g. https://192.168.1.12:9443
-#   - PORTAINER_API_TOKEN  generated in Portainer UI → Settings → Access Tokens
-# ==========================================================================
+# Copy the version you need into your app repo at .github/workflows/homelabdeploy.yml
 
 on:
   push:
     branches:
-      - main  # Automatically triggers whenever code is pushed to main
+      - main
 
 jobs:
   local-build-and-deploy:
-    runs-on: self-hosted  # Forces the job to run on your local homelab runner
-
+    runs-on: self-hosted
     steps:
-      # ==========================================
-      # STEP 1: CHECKOUT SOURCE CODE
-      # ==========================================
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # ==========================================
-      # STEP 2: LOCAL DOCKER CACHE BUILD
-      # ==========================================
       - name: Build Docker Image Locally
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
           echo "Starting local build for image: homelab/$REPO_NAME:latest..."
-          docker build --pull -t "homelab/${REPO_NAME}:latest" .
+          docker build -t "homelab/${REPO_NAME}:latest" .
           echo "Image successfully injected into local Docker host cache."
 
       # ==========================================
@@ -64,9 +52,23 @@ jobs:
           echo "Checking if stack '$STACK_NAME' already exists in Portainer..."
           
           STACK_ID=$(curl -sk -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" "${{ secrets.PORTAINER_URL }}/api/stacks" | jq -r ".[] | select(.Name==\"$STACK_NAME\") | .Id")
-
+          
           if [ -z "$STACK_ID" ]; then
             echo "Stack does not exist. Instructing Portainer to create it from Git..."
+            
+            # ================== PUBLIC REPO VERSION (default / safe) ==================
+            # curl -f -X POST -k "${{ secrets.PORTAINER_URL }}/api/stacks/create/standalone/repository?endpointId=${ENDPOINT_ID}" \
+            #   -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
+            #   -H "Content-Type: application/json" \
+            #   -d '{
+            #     "Name": "'"$STACK_NAME"'",
+            #     "RepositoryURL": "https://github.com/${{ github.repository }}",
+            #     "RepositoryReferenceName": "refs/heads/main",
+            #     "ComposeFile": "docker-compose.yaml",
+            #     "RepositoryAuthentication": false
+            #   }'
+            
+            # ================== PRIVATE REPO VERSION (for private repositories) ==================
             curl -f -X POST -k "${{ secrets.PORTAINER_URL }}/api/stacks/create/standalone/repository?endpointId=${ENDPOINT_ID}" \
               -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
               -H "Content-Type: application/json" \
@@ -74,15 +76,31 @@ jobs:
                 "Name": "'"$STACK_NAME"'",
                 "RepositoryURL": "https://github.com/${{ github.repository }}",
                 "RepositoryReferenceName": "refs/heads/main",
-                "ComposeFile": "docker-compose.yml",
-                "RepositoryAuthentication": false
+                "ComposeFile": "docker-compose.yaml",
+                "RepositoryAuthentication": true,
+                "RepositoryUsername": "${{ secrets.GIT_USERNAME }}",
+                "RepositoryPassword": "${{ secrets.GIT_PAT }}"
               }'
+            
             echo "New Git-backed stack successfully created in Portainer!"
           else
             echo "Stack found with ID: $STACK_ID. Triggering Git pull and stack recreation..."
+            
+            # ================== PUBLIC REPO VERSION ==================
+            # curl -f -X PUT -k "${{ secrets.PORTAINER_URL }}/api/stacks/${STACK_ID}/git/redeploy?endpointId=${ENDPOINT_ID}" \
+            #   -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
+            #   -H "Content-Type: application/json" \
+            #   -d '{"RepositoryAuthentication": false}'
+            
+            # ================== PRIVATE REPO VERSION ==================
             curl -f -X PUT -k "${{ secrets.PORTAINER_URL }}/api/stacks/${STACK_ID}/git/redeploy?endpointId=${ENDPOINT_ID}" \
               -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
               -H "Content-Type: application/json" \
-              -d '{"RepositoryAuthentication": false}'
+              -d '{
+                "RepositoryAuthentication": true,
+                "RepositoryUsername": "${{ secrets.GIT_USERNAME }}",
+                "RepositoryPassword": "${{ secrets.GIT_PAT }}"
+              }'
+            
             echo "Existing stack updated and redeployed!"
           fi
