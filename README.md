@@ -156,7 +156,7 @@ flowchart TD
     G --> H["✅ Container running on<br/>proxy-network"]
 ```
 
-**How it works (plain English):**
+**How it works:**
 
 1. The AI agent commits application code, a `Dockerfile`, and a `docker-compose.yml` to this repo.
 2. GitHub Actions sees the new commit and queues a deployment job tagged `runs-on: self-hosted`.
