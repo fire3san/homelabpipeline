@@ -1,0 +1,51 @@
+flowchart LR
+    subgraph Internet["🌐  Public Internet"]
+        User["👤  End user"]
+        GH["🐙  GitHub<br/>Repo + Actions"]
+    end
+
+    subgraph Cloud["☁️  Cloudflare Edge"]
+        CF["✦  *.yourdomain.com<br/>Wildcard DNS + Tunnel"]
+    end
+
+    subgraph Homelab["🏠  Proxmox Host — LAN"]
+        direction TB
+        Claw["🤖  openclaw-ubuntu<br/>AI coding agent"]
+        subgraph DockerVM["⚙️  docker-ubuntu"]
+            Runner["🏃  GitHub Runner<br/>(myoung34)"]
+            Portainer["🔲  Portainer"]
+            Traefik["🚦  Traefik v3"]
+            Monitoring["📊  Monitoring<br/>Prometheus · Grafana · PVE"]
+            Apps["📦  Apps"]
+        end
+        Tunnel["🔒  cloudflared VM<br/>Tunnel client"]
+        PVE["🖥️  Proxmox VE<br/>API :8006"]
+    end
+
+    Claw   -- "① git push" --> GH
+    GH     -. "② poll job (outbound)" .-> Runner
+    User   -- "③ request" --> CF
+    CF     -- "④ tunnel (TLS)" --> Tunnel
+    Tunnel -- "⑤ HTTP :80" --> Traefik
+    Traefik -- "⑥ route" --> Apps
+    Monitoring -- "scrape :9221" --> PVE
+    Monitoring -- "scrape :8080" --> Traefik
+
+    classDef internet   fill:#FFF9C4,stroke:#F57F17,stroke-width:2px,color:#E65100
+    classDef cloud      fill:#BBDEFB,stroke:#1565C0,stroke-width:2px,color:#0D47A1
+    classDef docker     fill:#FFE0B2,stroke:#EF6C00,stroke-width:2px,color:#BF360C
+    classDef gateway    fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
+    classDef monitor    fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#004D40
+    classDef proxmox    fill:#C8E6C9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
+
+    class User,GH internet
+    class CF cloud
+    class Runner,Portainer,Apps docker
+    class Traefik,Tunnel gateway
+    class Monitoring monitor
+    class Claw,PVE proxmox
+
+    style Internet fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#5D4037
+    style Cloud    fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#0D47A1
+    style Homelab  fill:#F1F8E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+    style DockerVM fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px,color:#BF360C

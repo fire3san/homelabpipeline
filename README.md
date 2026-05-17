@@ -52,59 +52,13 @@ The whole thing runs on a single Proxmox host split into purpose-built VMs, so e
 
 ## 🗺️ Architecture at a glance
 
-```mermaid
-flowchart LR
-    subgraph Internet["🌐  Public Internet"]
-        User["👤  End user"]
-        GH["🐙  GitHub<br/>Repo + Actions"]
-    end
+<img src="docs/diagrams/architecture.svg" alt="Architecture at a glance — end-to-end flow from user request through Cloudflare Tunnel to homelab containers" width="100%">
 
-    subgraph Cloud["☁️  Cloudflare Edge"]
-        CF["✦  *.yourdomain.com<br/>Wildcard DNS + Tunnel"]
-    end
+<details><summary>📐 View / edit diagram source</summary>
 
-    subgraph Homelab["🏠  Proxmox Host — LAN"]
-        direction TB
-        Claw["🤖  openclaw-ubuntu<br/>AI coding agent"]
-        subgraph DockerVM["⚙️  docker-ubuntu"]
-            Runner["🏃  GitHub Runner<br/>(myoung34)"]
-            Portainer["🔲  Portainer"]
-            Traefik["🚦  Traefik v3"]
-            Monitoring["📊  Monitoring<br/>Prometheus · Grafana · PVE"]
-            Apps["📦  Apps"]
-        end
-        Tunnel["🔒  cloudflared VM<br/>Tunnel client"]
-        PVE["🖥️  Proxmox VE<br/>API :8006"]
-    end
+The Mermaid source for this diagram lives in [`docs/diagrams/architecture.mmd`](docs/diagrams/architecture.mmd). Edit it and re-render with `mmdc` — see [`docs/diagrams/README.md`](docs/diagrams/README.md) for instructions.
 
-    Claw   -- "① git push" --> GH
-    GH     -. "② poll job (outbound)" .-> Runner
-    User   -- "③ request" --> CF
-    CF     -- "④ tunnel (TLS)" --> Tunnel
-    Tunnel -- "⑤ HTTP :80" --> Traefik
-    Traefik -- "⑥ route" --> Apps
-    Monitoring -- "scrape :9221" --> PVE
-    Monitoring -- "scrape :8080" --> Traefik
-
-    classDef internet   fill:#FFF9C4,stroke:#F57F17,stroke-width:2px,color:#E65100
-    classDef cloud      fill:#BBDEFB,stroke:#1565C0,stroke-width:2px,color:#0D47A1
-    classDef docker     fill:#FFE0B2,stroke:#EF6C00,stroke-width:2px,color:#BF360C
-    classDef gateway    fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
-    classDef monitor    fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#004D40
-    classDef proxmox    fill:#C8E6C9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
-
-    class User,GH internet
-    class CF cloud
-    class Runner,Portainer,Apps docker
-    class Traefik,Tunnel gateway
-    class Monitoring monitor
-    class Claw,PVE proxmox
-
-    style Internet fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#5D4037
-    style Cloud    fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#0D47A1
-    style Homelab  fill:#F1F8E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
-    style DockerVM fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px,color:#BF360C
-```
+</details>
 
 > **Color key:** 🟡 Public internet · 🔵 Cloudflare · 🟢 Proxmox/infra · 🟠 Docker services · 🟣 Gateways (Traefik, cloudflared) · 🟢 Monitoring
 
@@ -116,81 +70,13 @@ flowchart LR
 
 This diagram shows the **logical** layout of the home network — devices, subnets, and the trust boundaries between them. Solid lines are normal LAN traffic; the dashed line is the one outbound-only connection that links the homelab to the public internet.
 
-```mermaid
-flowchart TB
-    subgraph WAN["🔴  Public Internet — UNTRUSTED"]
-        direction LR
-        U["👤  End users"]
-        CFE["☁️  Cloudflare Edge<br/>(yourdomain.com)"]
-        GHC["🐙  GitHub.com"]
-    end
+<img src="docs/diagrams/topology.svg" alt="Home-network topology — logical layout showing trust boundaries between untrusted internet, ISP boundary, and trusted LAN" width="100%">
 
-    ISP["📶  ISP modem / router<br/>NAT · no inbound port-forwards"]
+<details><summary>📐 View / edit diagram source</summary>
 
-    subgraph LAN["🟢  Home LAN — TRUSTED — 192.168.1.0/24"]
-        direction TB
-        Admin["💻  Admin laptop<br/>SSH + Portainer UI"]
-        subgraph PROX["🖥️  Proxmox VE — 192.168.1.10"]
-            direction TB
-            VMC["🤖  openclaw-ubuntu<br/>192.168.1.11"]
-            VMD["⚙️  docker-ubuntu<br/>192.168.1.12"]
-            VMT["🔒  cloudflared<br/>192.168.1.13"]
-            subgraph DOCK["🐳  Docker — 172.18.0.0/16"]
-                direction LR
-                RUN["🏃  GitHub Runner<br/>(myoung34)"]
-                TRA["🚦  Traefik<br/>proxy-network"]
-                POR["🔲  Portainer"]
-                MON["📊  Monitoring<br/>Prometheus · Grafana · PVE"]
-                APP1["📦  App 1<br/>proxy-network"]
-                APP2["📦  App 2<br/>proxy-network"]
-            end
-            VMD --- DOCK
-        end
-    end
+The Mermaid source for this diagram lives in [`docs/diagrams/topology.mmd`](docs/diagrams/topology.mmd). Edit it and re-render with `mmdc` — see [`docs/diagrams/README.md`](docs/diagrams/README.md) for instructions.
 
-    U --> CFE
-    CFE -. "outbound tunnel (TLS)" .-> VMT
-    VMT -- "HTTP :80 (LAN)" --> TRA
-    TRA --> APP1
-    TRA --> APP2
-    MON -- "scrape :8080" --> TRA
-    MON -- "scrape :9221" --> VMD
-
-    VMC -- "git push (outbound 443)" --> GHC
-    RUN -- "runner poll (outbound 443)" --> GHC
-
-    Admin -- "SSH :22 / Portainer :9443" --> VMD
-    Admin -- "SSH :22" --> VMC
-    Admin -- "SSH :22" --> VMT
-
-    LAN --- ISP
-    ISP --- WAN
-
-    classDef untrusted    fill:#FFCDD2,stroke:#C62828,stroke-width:2px,color:#B71C1C
-    classDef isp          fill:#ECEFF1,stroke:#546E7A,stroke-width:2px,color:#37474F
-    classDef admin        fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#0D47A1
-    classDef lanvm        fill:#DCEDC8,stroke:#558B2F,stroke-width:2px,color:#33691E
-    classDef cloudflared  fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
-    classDef dockersvc    fill:#FFE0B2,stroke:#EF6C00,stroke-width:2px,color:#BF360C
-    classDef gateway      fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
-    classDef monitor      fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#004D40
-    classDef apps         fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#F57F17
-
-    class U,CFE,GHC untrusted
-    class ISP isp
-    class Admin admin
-    class VMC,VMD lanvm
-    class VMT cloudflared
-    class RUN,POR dockersvc
-    class TRA gateway
-    class MON monitor
-    class APP1,APP2 apps
-
-    style WAN   fill:#FFEBEE,stroke:#C62828,stroke-width:2px,color:#B71C1C
-    style LAN   fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
-    style PROX  fill:#F1F8E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
-    style DOCK  fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px,color:#BF360C
-```
+</details>
 
 > **Color key:** 🔴 Untrusted zone · 🟢 Trusted LAN · 🟣 Gateways (Traefik, cloudflared) · 🟠 Docker services · 🟡 Apps · 🔵 Admin · ⚪ ISP boundary
 
@@ -316,6 +202,12 @@ homelabpipeline/
 ├── TraefikPortainerSetupGuide.md        ← Deploy Portainer + Traefik (auto subfolder routing)
 ├── CloudflareTunnelSetupGuide.md        ← Create the Cloudflare Tunnel + cloudflared
 ├── GitHubRunnerSetupGuide.md            ← Register the self-hosted GitHub runner
+├── docs/
+│   └── diagrams/
+│       ├── architecture.mmd             ← Mermaid source — Architecture at a glance
+│       ├── architecture.svg / .png       ← Rendered diagram
+│       ├── topology.mmd                  ← Mermaid source — Home-network topology
+│       └── topology.svg / .png          ← Rendered diagram
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml                   ← Deploys infra stacks from stacks/ on push to main

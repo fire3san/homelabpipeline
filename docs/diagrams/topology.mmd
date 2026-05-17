@@ -1,0 +1,73 @@
+flowchart TB
+    subgraph WAN["🔴  Public Internet — UNTRUSTED"]
+        direction LR
+        U["👤  End users"]
+        CFE["☁️  Cloudflare Edge<br/>(yourdomain.com)"]
+        GHC["🐙  GitHub.com"]
+    end
+
+    ISP["📶  ISP modem / router<br/>NAT · no inbound port-forwards"]
+
+    subgraph LAN["🟢  Home LAN — TRUSTED — 192.168.1.0/24"]
+        direction TB
+        Admin["💻  Admin laptop<br/>SSH + Portainer UI"]
+        subgraph PROX["🖥️  Proxmox VE — 192.168.1.10"]
+            direction TB
+            VMC["🤖  openclaw-ubuntu<br/>192.168.1.11"]
+            VMD["⚙️  docker-ubuntu<br/>192.168.1.12"]
+            VMT["🔒  cloudflared<br/>192.168.1.13"]
+            subgraph DOCK["🐳  Docker — 172.18.0.0/16"]
+                direction LR
+                RUN["🏃  GitHub Runner<br/>(myoung34)"]
+                TRA["🚦  Traefik<br/>proxy-network"]
+                POR["🔲  Portainer"]
+                MON["📊  Monitoring<br/>Prometheus · Grafana · PVE"]
+                APP1["📦  App 1<br/>proxy-network"]
+                APP2["📦  App 2<br/>proxy-network"]
+            end
+            VMD --- DOCK
+        end
+    end
+
+    U --> CFE
+    CFE -. "outbound tunnel (TLS)" .-> VMT
+    VMT -- "HTTP :80 (LAN)" --> TRA
+    TRA --> APP1
+    TRA --> APP2
+    MON -- "scrape :8080" --> TRA
+    MON -- "scrape :9221" --> VMD
+
+    VMC -- "git push (outbound 443)" --> GHC
+    RUN -- "runner poll (outbound 443)" --> GHC
+
+    Admin -- "SSH :22 / Portainer :9443" --> VMD
+    Admin -- "SSH :22" --> VMC
+    Admin -- "SSH :22" --> VMT
+
+    LAN --- ISP
+    ISP --- WAN
+
+    classDef untrusted    fill:#FFCDD2,stroke:#C62828,stroke-width:2px,color:#B71C1C
+    classDef isp          fill:#ECEFF1,stroke:#546E7A,stroke-width:2px,color:#37474F
+    classDef admin        fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#0D47A1
+    classDef lanvm        fill:#DCEDC8,stroke:#558B2F,stroke-width:2px,color:#33691E
+    classDef cloudflared  fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
+    classDef dockersvc    fill:#FFE0B2,stroke:#EF6C00,stroke-width:2px,color:#BF360C
+    classDef gateway      fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px,color:#4A148C
+    classDef monitor      fill:#B2DFDB,stroke:#00695C,stroke-width:2px,color:#004D40
+    classDef apps         fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#F57F17
+
+    class U,CFE,GHC untrusted
+    class ISP isp
+    class Admin admin
+    class VMC,VMD lanvm
+    class VMT cloudflared
+    class RUN,POR dockersvc
+    class TRA gateway
+    class MON monitor
+    class APP1,APP2 apps
+
+    style WAN   fill:#FFEBEE,stroke:#C62828,stroke-width:2px,color:#B71C1C
+    style LAN   fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
+    style PROX  fill:#F1F8E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+    style DOCK  fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px,color:#BF360C
