@@ -1,0 +1,105 @@
+# ================================================
+# Zero Touch Homelab Deployment Template
+# ================================================
+#
+# This template works for BOTH public and private repositories.
+#
+# How to use:
+# 1. Public repo  → use the PUBLIC version below (RepositoryAuthentication: false)
+# 2. Private repo → use the PRIVATE version below (RepositoryAuthentication: true + GIT secrets)
+#
+# Copy the version you need into your app repo at .github/workflows/homelabdeploy.yml
+
+name: Zero Touch Homelab Deployment
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  local-build-and-deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image Locally
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          echo "Starting local build for image: homelab/$REPO_NAME:latest..."
+          docker build -t "homelab/${REPO_NAME}:latest" .
+          echo "Image successfully injected into local Docker host cache."
+
+      # ==========================================
+      # STEP 3: DYNAMIC PORTAINER STACK REGISTRATION
+      # ==========================================
+      - name: Register or Update Stack via Portainer API
+        run: |
+          STACK_NAME="${{ github.event.repository.name }}"
+          
+          echo "Dynamically discovering Portainer Environment ID..."
+          ENDPOINT_ID=$(curl -sk -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" "${{ secrets.PORTAINER_URL }}/api/endpoints" | jq -r '.[] | select(.Name=="local") | .Id')
+          
+          if [ -z "$ENDPOINT_ID" ] || [ "$ENDPOINT_ID" = "null" ]; then
+            ENDPOINT_ID=$(curl -sk -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" "${{ secrets.PORTAINER_URL }}/api/endpoints" | jq -r '.[0].Id')
+          fi
+          
+          DEFAULT_ID=3
+          ENDPOINT_ID=${ENDPOINT_ID:-$DEFAULT_ID}
+          
+          echo "Targeting Portainer Environment ID: $ENDPOINT_ID"
+          echo "Checking if stack '$STACK_NAME' already exists in Portainer..."
+          
+          STACK_ID=$(curl -sk -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" "${{ secrets.PORTAINER_URL }}/api/stacks" | jq -r ".[] | select(.Name==\"$STACK_NAME\") | .Id")
+          
+          if [ -z "$STACK_ID" ]; then
+            echo "Stack does not exist. Instructing Portainer to create it from Git..."
+            
+            # ================== PUBLIC REPO VERSION (default) ==================
+            # curl -f -X POST -k "${{ secrets.PORTAINER_URL }}/api/stacks/create/standalone/repository?endpointId=${ENDPOINT_ID}" \
+            #   -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
+            #   -H "Content-Type: application/json" \
+            #   -d '{
+            #     "Name": "'"$STACK_NAME"'",
+            #     "RepositoryURL": "https://github.com/${{ github.repository }}",
+            #     "RepositoryReferenceName": "refs/heads/main",
+            #     "ComposeFile": "docker-compose.yaml",
+            #     "RepositoryAuthentication": false
+            #   }'
+            
+            # ================== PRIVATE REPO VERSION (recommended for private repos) ==================
+            curl -f -X POST -k "${{ secrets.PORTAINER_URL }}/api/stacks/create/standalone/repository?endpointId=${ENDPOINT_ID}" \
+              -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "Name": "'"$STACK_NAME"'",
+                "RepositoryURL": "https://github.com/${{ github.repository }}",
+                "RepositoryReferenceName": "refs/heads/main",
+                "ComposeFile": "docker-compose.yaml",
+                "RepositoryAuthentication": true,
+                "RepositoryUsername": "${{ secrets.GIT_USERNAME }}",
+                "RepositoryPassword": "${{ secrets.GIT_PAT }}"
+              }'
+            
+            echo "New Git-backed stack successfully created in Portainer!"
+          else
+            echo "Stack found with ID: $STACK_ID. Triggering Git pull and stack recreation..."
+            
+            # ================== PUBLIC REPO VERSION ==================
+            # curl -f -X PUT -k "${{ secrets.PORTAINER_URL }}/api/stacks/${STACK_ID}/git/redeploy?endpointId=${ENDPOINT_ID}" \
+            #   -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
+            #   -H "Content-Type: application/json" \
+            #   -d '{"RepositoryAuthentication": false}'
+            
+            # ================== PRIVATE REPO VERSION ==================
+            curl -f -X PUT -k "${{ secrets.PORTAINER_URL }}/api/stacks/${STACK_ID}/git/redeploy?endpointId=${ENDPOINT_ID}" \
+              -H "X-API-Key: ${{ secrets.PORTAINER_API_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "RepositoryAuthentication": true,
+                "RepositoryUsername": "${{ secrets.GIT_USERNAME }}",
+                "RepositoryPassword": "${{ secrets.GIT_PAT }}"
+              }'
+            
+            echo "Existing stack updated and redeployed!"
+          fi
