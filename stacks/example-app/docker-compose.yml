@@ -1,0 +1,30 @@
+# Example app stack
+#
+# - The service name `example-app` becomes the URL path: https://yourdomain.com/example-app
+# - The `auto-strip-prefix@file` middleware (defined in Traefik's dynamic.yml) strips that
+#   prefix before forwarding to the container, so the container just sees `/`.
+# - Replace `nginxdemos/hello:latest` with your own image to deploy a real app.
+
+services:
+  example-app:
+    image: nginxdemos/hello:latest
+    container_name: example-app
+    restart: unless-stopped
+    networks:
+      - proxy-network
+    # Optional: expose a LAN-only port for local testing / bypass.
+    # ports:
+    #   - "8081:80"
+    labels:
+      # 1. Tell Traefik to route to this container.
+      - "traefik.enable=true"
+
+      # 2. Apply the prefix-stripping middleware defined in dynamic.yml.
+      - "traefik.http.routers.example-app.middlewares=auto-strip-prefix@file"
+
+      # 3. The internal port the container listens on.
+      - "traefik.http.services.example-app.loadbalancer.server.port=80"
+
+networks:
+  proxy-network:
+    external: true

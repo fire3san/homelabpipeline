@@ -1,0 +1,33 @@
+# Example app stack — PER-HOST (subdomain) variant
+#
+# Use this pattern when an app does NOT play well with a subfolder path
+# (e.g. it generates absolute links to `/static/...`, won't rewrite asset URLs,
+# or you simply want app.yourdomain.com instead of yourdomain.com/app).
+#
+# What changes vs. the subfolder variant:
+#   - Explicit Host(`app.yourdomain.com`) rule on the router  (overrides defaultRule)
+#   - NO auto-strip-prefix middleware  (no path to strip)
+#   - Your Cloudflare Tunnel must still cover this hostname  (`*.yourdomain.com` does it)
+
+services:
+  example-app-host:
+    image: nginxdemos/hello:latest
+    container_name: example-app-host
+    restart: unless-stopped
+    networks:
+      - proxy-network
+    labels:
+      - "traefik.enable=true"
+
+      # Override the defaultRule with an explicit Host match.
+      - "traefik.http.routers.example-app-host.rule=Host(`app.yourdomain.com`)"
+      - "traefik.http.routers.example-app-host.entrypoints=web"
+
+      # Optional: attach a middleware chain (uncomment in dynamic.yml first).
+      # - "traefik.http.routers.example-app-host.middlewares=compress@file,security-headers@file"
+
+      - "traefik.http.services.example-app-host.loadbalancer.server.port=80"
+
+networks:
+  proxy-network:
+    external: true

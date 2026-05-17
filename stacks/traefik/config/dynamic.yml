@@ -1,0 +1,68 @@
+# Traefik v3 dynamic configuration
+#
+# This file is loaded by the `--providers.file.filename` flag in docker-compose.yml.
+# Put it on the host at:  /home/ubuntu/traefik/config/dynamic.yml
+#
+# Anything defined here is referenced by container labels using the `@file` suffix,
+# e.g.  traefik.http.routers.my-app.middlewares=auto-strip-prefix@file
+
+http:
+  # ---------------------------------------------------------------------------
+  # ACTIVE MIDDLEWARES — used by the subfolder-routing pattern
+  # ---------------------------------------------------------------------------
+  middlewares:
+
+    # Strip the first path segment so the container sees `/` instead of `/my-app/...`
+    auto-strip-prefix:
+      stripPrefixRegex:
+        regex:
+          - "^/[^/]+"
+
+    # -------------------------------------------------------------------------
+    # OPTIONAL MIDDLEWARES — uncomment & attach to routers when needed.
+    # -------------------------------------------------------------------------
+
+    # Basic-auth gate. Generate users with:  htpasswd -nb alice s3cret
+    # basic-auth:
+    #   basicAuth:
+    #     users:
+    #       - "alice:$apr1$abc...$xyz..."
+
+    # Rate-limit: 50 req/s average, burst of 100 per source IP.
+    # rate-limit:
+    #   rateLimit:
+    #     average: 50
+    #     burst: 100
+
+    # IP allow-list — restrict an app to LAN clients only.
+    # lan-only:
+    #   ipAllowList:
+    #     sourceRange:
+    #       - "192.168.1.0/24"
+    #       - "172.18.0.0/16"
+
+    # Gzip / Brotli compression.
+    # compress:
+    #   compress: {}
+
+    # Sensible default security headers.
+    # security-headers:
+    #   headers:
+    #     frameDeny: true
+    #     contentTypeNosniff: true
+    #     browserXssFilter: true
+    #     referrerPolicy: "strict-origin-when-cross-origin"
+    #     stsSeconds: 31536000
+    #     stsIncludeSubdomains: true
+    #     customResponseHeaders:
+    #       X-Powered-By: ""        # hide
+    #       Server: ""               # hide
+
+  # ---------------------------------------------------------------------------
+  # OPTIONAL: static TLS options (only relevant if you ever terminate TLS at Traefik
+  # instead of at Cloudflare — see the HTTPS/Let's Encrypt variant in the README).
+  # ---------------------------------------------------------------------------
+  # tls:
+  #   options:
+  #     modern:
+  #       minVersion: VersionTLS13

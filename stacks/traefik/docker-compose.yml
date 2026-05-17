@@ -1,0 +1,50 @@
+# Traefik v3 stack
+#
+# - Hardcoded domain placeholder: yourdomain.com  (replace before deploy)
+# - Uses an absolute bind mount for the dynamic config file (Portainer-friendly).
+# - Mounts the Docker socket read-only.
+# - Apps are routed by service-name -> URL path prefix via the defaultRule below.
+
+services:
+  traefik:
+    image: traefik:latest          # Pin to a specific minor (e.g. traefik:v3.6) for production.
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      # --- API / dashboard ---
+      - "--api.insecure=true"                                     # LAN-only dashboard on :8080
+      # --- Entrypoints ---
+      - "--entrypoints.web.address=:80"                           # Cloudflare tunnel terminates here
+
+      # --- Docker provider ---
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"               # Containers must opt-in with labels
+      - "--providers.docker.network=proxy-network"
+
+      # 🤖 MASTER AUTOMATION RULE
+      # Auto-builds: Host(`yourdomain.com`) && PathPrefix(`/<service-name>`)
+      # Replace `yourdomain.com` with your real domain before deploying.
+      - "--providers.docker.defaultRule=Host(`yourdomain.com`) && PathPrefix(`/{{ index .Labels \"com.docker.compose.service\" }}`)"
+
+      # --- File provider (for middlewares defined in dynamic.yml) ---
+      - "--providers.file.filename=/etc/traefik/config/dynamic.yml"
+      - "--providers.file.watch=true"
+
+      # --- Logging (uncomment if you need to debug) ---
+      # - "--log.level=DEBUG"
+      # - "--accesslog=true"
+
+    ports:
+      - "80:80"        # Public ingress (reached via cloudflared on the LAN)
+      - "8080:8080"    # Dashboard — LAN ONLY. Do NOT expose via the tunnel.
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /home/ubuntu/traefik/config:/etc/traefik/config:ro
+
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    external: true

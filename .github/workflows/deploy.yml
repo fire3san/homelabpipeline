@@ -1,0 +1,56 @@
+name: Deploy stack
+
+# Triggers when a stack changes on main. Adjust the path filter to match your layout.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "stacks/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: "Stack folder under stacks/ to deploy (e.g. example-app)"
+        required: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, docker]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect changed stacks
+        id: changes
+        run: |
+          if [ -n "${{ github.event.inputs.stack }}" ]; then
+            echo "stacks=stacks/${{ github.event.inputs.stack }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # On a push, find which stack folders changed in this commit.
+          changed=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} \
+            | grep '^stacks/' \
+            | awk -F/ '{print $1"/"$2}' \
+            | sort -u \
+            | tr '\n' ' ')
+          echo "stacks=${changed}" >> "$GITHUB_OUTPUT"
+
+      - name: Show stacks to deploy
+        run: echo "Will deploy:: ${{ steps.changes.outputs.stacks }}"
+
+      - name: Deploy each changed stack
+        if: steps.changes.outputs.stacks != ''
+        run: |
+          set -euo pipefail
+          for dir in ${{ steps.changes.outputs.stacks }}; do
+            echo "===> Deploying $dir"
+            cd "$GITHUB_WORKSPACE/$dir"
+            docker compose pull || true
+            docker compose up -d --build --remove-orphans
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: Prune dangling images (best-effort)
+        if: always()
+        run: docker image prune -f

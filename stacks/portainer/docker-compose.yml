@@ -1,0 +1,25 @@
+# Portainer CE stack
+#
+# Web UI: https://<docker-ubuntu-IP>:9443  (self-signed cert; LAN-only)
+# Edge tunnel port :8000 is optional — only needed if you use Portainer Edge agents.
+
+services:
+  portainer:
+    image: portainer/portainer-ce:lts
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # Edge agent tunnel (optional)
+      - "9443:9443"   # HTTPS web UI (LAN-only — never expose via the Cloudflare tunnel)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - proxy-network
+
+volumes:
+  portainer_data:
+
+networks:
+  proxy-network:
+    external: true

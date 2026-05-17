@@ -12,16 +12,19 @@ If you are new to homelabbing, reverse proxies, or self-hosted CI/CD, don't worr
 
 1. [What is this project?](#-what-is-this-project)
 2. [Architecture at a glance](#%EF%B8%8F-architecture-at-a-glance)
-3. [The two pipelines](#-the-two-pipelines)
+3. [Home-network topology](#-home-network-topology)
+4. [The two pipelines](#-the-two-pipelines)
    - [CI/CD pipeline (code → container)](#1-cicd-pipeline-code--container)
    - [Traffic pipeline (internet → container)](#2-traffic-pipeline-internet--container)
-4. [Infrastructure & tools](#%EF%B8%8F-infrastructure--tools)
-5. [Repository structure](#-repository-structure)
-6. [Getting started](#-getting-started)
-7. [Adding a new app](#-adding-a-new-app)
-8. [Security & zero-trust rationale](#-security--zero-trust-rationale)
-9. [Troubleshooting](#%EF%B8%8F-troubleshooting)
-10. [Glossary](#-glossary)
+5. [Infrastructure & tools](#%EF%B8%8F-infrastructure--tools)
+6. [Port usage](#-port-usage)
+7. [Repository structure](#-repository-structure)
+8. [Getting started](#-getting-started)
+9. [Setup guides](#-setup-guides)
+10. [Adding a new app](#-adding-a-new-app)
+11. [Security & zero-trust rationale](#-security--zero-trust-rationale)
+12. [Troubleshooting](#%EF%B8%8F-troubleshooting)
+13. [Glossary](#-glossary)
 
 ---
 
@@ -73,6 +76,68 @@ flowchart LR
 ```
 
 **Key idea:** all arrows entering the homelab are **outbound-initiated** by the homelab itself. The router never sees an inbound connection request.
+
+---
+
+## 🏘️ Home-network topology
+
+This diagram shows the **logical** layout of the home network — devices, subnets, and the trust boundaries between them. Solid lines are normal LAN traffic; the dashed line is the one outbound-only connection that links the homelab to the public internet.
+
+```mermaid
+flowchart TB
+    subgraph WAN["🌍 Public Internet — UNTRUSTED"]
+        direction LR
+        U["👤 End users"]
+        CFE["☁️ Cloudflare Edge<br/>(yourdomain.com)"]
+        GHC["🐙 GitHub.com"]
+    end
+
+    ISP["📶 ISP modem/router<br/>(NAT, no inbound port-forwards)"]
+
+    subgraph LAN["🏠 Home LAN — TRUSTED — 192.168.1.0/24"]
+        direction TB
+        Admin["💻 Admin laptop<br/>(SSH + Portainer UI)"]
+        subgraph PROX["🖥️ Proxmox VE host — 192.168.1.10"]
+            direction TB
+            VMC["🤖 openclaw-ubuntu<br/>192.168.1.11"]
+            VMD["⚙️ docker-ubuntu<br/>192.168.1.12"]
+            VMT["🔒 cloudflared<br/>192.168.1.13"]
+            subgraph DOCK["🐳 Docker on docker-ubuntu — proxy-network bridge — 172.18.0.0/16"]
+                direction LR
+                TRA["🚦 Traefik<br/>172.18.0.2"]
+                APP1["📦 App 1<br/>172.18.0.3"]
+                APP2["📦 App 2<br/>172.18.0.4"]
+            end
+            VMD --- DOCK
+        end
+    end
+
+    U --> CFE
+    CFE -. "outbound tunnel (TLS, persistent)" .-> VMT
+    VMT -- "HTTP :80 (LAN only)" --> TRA
+    TRA --> APP1
+    TRA --> APP2
+
+    VMC -- "git push (outbound 443)" --> GHC
+    VMD -- "runner poll (outbound 443)" --> GHC
+
+    Admin -- "SSH :22 / HTTPS :9443" --> VMD
+    Admin -- "SSH :22" --> VMC
+    Admin -- "SSH :22" --> VMT
+
+    LAN --- ISP
+    ISP --- WAN
+```
+
+### Trust boundaries
+
+| Boundary | Direction | Notes |
+|----------|-----------|-------|
+| Internet ↔ ISP router | Inbound **denied** | No port-forwards. ISP NAT acts as a basic firewall. |
+| Cloudflare ↔ `cloudflared` VM | Outbound **only** (initiated by `cloudflared`) | The tunnel is the *only* path from the public internet into the homelab. |
+| `cloudflared` ↔ `docker-ubuntu` | LAN, port 80 | Plain HTTP is fine here — TLS is terminated at Cloudflare and the LAN is trusted. |
+| `docker-ubuntu` ↔ `proxy-network` | Docker bridge | Containers talk to each other only through this bridge. |
+| Admin laptop ↔ VMs | LAN, port 22 / 9443 | SSH key auth; management UIs are LAN-only. |
 
 ---
 
@@ -149,16 +214,52 @@ flowchart TD
 
 ---
 
-## 📂 Repository structure
+## � Port usage
+
+A single source of truth for every port that listens anywhere in the homelab. Anything not listed here should **not** be open.
+
+| Port | Proto | Host / Container | Service | Reachable from | Notes |
+|------|-------|------------------|---------|----------------|-------|
+| `22` | TCP | All VMs | OpenSSH | LAN only | Key-based auth only; disable password auth. |
+| `80` | TCP | `docker-ubuntu` → Traefik container | HTTP ingress | `cloudflared` (LAN) | Plain HTTP; TLS is terminated at Cloudflare's edge. |
+| `443` | TCP | — | *(not used)* | — | No HTTPS listener inside the LAN; Cloudflare handles TLS. |
+| `8080` | TCP | Traefik container | Traefik dashboard / API | LAN only | `--api.insecure=true`; never expose via the tunnel. |
+| `9443` | TCP | `docker-ubuntu` → Portainer container | Portainer Web UI (HTTPS) | LAN only | Self-signed cert; access via `https://<docker-ubuntu>:9443`. |
+| `8000` | TCP | `docker-ubuntu` → Portainer container | Portainer Edge agent tunnel | LAN only | Optional; only needed if you use Edge agents. |
+| `8081+` | TCP | `docker-ubuntu` → app containers | Per-app LAN bypass | LAN only (optional) | Handy for local testing/safety net; not required for the public flow. |
+| `*/443` | TCP | `cloudflared` VM → Cloudflare | Outbound tunnel | Outbound to internet | The only sustained connection leaving the homelab to the public internet. |
+| `*/443` | TCP | Self-Hosted Runner → GitHub | Job polling | Outbound to internet | HTTPS poll; no inbound rule needed. |
+
+> 🛡️ Rule of thumb: if a port shows **"Reachable from: LAN only"**, make sure your router's firewall (or `ufw` on the VM) drops that port from the WAN side, and never add a Cloudflare public hostname pointing at it.
+
+---
+
+## �📂 Repository structure
 
 ```
 homelabpipeline/
-├── README.md                       ← You are here
-├── TraefikPortainerSetupGuide.md   ← Step-by-step Traefik + Portainer setup
-└── (future: workflows/, stacks/, ansible/, etc.)
+├── README.md                            ← You are here
+├── ProxmoxVMSetupGuide.md               ← Provision the three Ubuntu VMs on Proxmox
+├── DockerInstallSetupGuide.md           ← Install Docker + create the proxy-network
+├── TraefikPortainerSetupGuide.md        ← Deploy Portainer + Traefik (auto subfolder routing)
+├── CloudflareTunnelSetupGuide.md        ← Create the Cloudflare Tunnel + cloudflared
+├── GitHubRunnerSetupGuide.md            ← Register the self-hosted GitHub runner
+├── .github/
+│   └── workflows/
+│       └── deploy.yml                   ← Example self-hosted deploy workflow
+└── stacks/
+    ├── traefik/
+    │   ├── docker-compose.yml           ← Traefik v3 stack (subfolder routing)
+    │   └── config/dynamic.yml           ← File-provider middlewares
+    ├── portainer/
+    │   └── docker-compose.yml           ← Portainer CE stack
+    ├── example-app/
+    │   └── docker-compose.yml           ← Subfolder routing variant (yourdomain.com/example-app)
+    └── example-app-host/
+        └── docker-compose.yml           ← Per-host routing variant (app.yourdomain.com)
 ```
 
-> 💡 As the project grows, app stacks and GitHub workflow files will live alongside this README. Keep the root directory navigable — one folder per concern.
+> 💡 Keep the root directory navigable — one folder per concern, one guide per major component.
 
 ---
 
@@ -175,35 +276,50 @@ This is a homelab project, so "getting started" means **building out the infrast
 
 ### High-level setup order
 
-1. **Provision Proxmox** and create three Ubuntu VMs: `docker-ubuntu`, `openclaw-ubuntu`, `cloudflared`. Give `docker-ubuntu` the most resources — that's where your apps live.
-2. **Install Docker** on `docker-ubuntu` (`curl -fsSL https://get.docker.com | sh`).
-3. **Set up the Cloudflare Tunnel** on the `cloudflared` VM:
-   - Create a tunnel in the Cloudflare dashboard.
-   - Add a public hostname `*.yourdomain.com` → `http://<docker-ubuntu-ip>:80`.
-   - Run the `cloudflared` daemon with the provided token.
-4. **Deploy Portainer + Traefik** following [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md). Don't skip the `proxy-network` bridge creation step — it's the glue.
-5. **Register the GitHub Self-Hosted Runner** on `docker-ubuntu`:
-   - GitHub repo → Settings → Actions → Runners → New self-hosted runner.
-   - Follow the displayed shell commands; install it as a service (`./svc.sh install && ./svc.sh start`).
-6. **Add your first app** — see the next section.
+Work through the setup guides in this order. Each one is self-contained and builds on the previous.
+
+1. 🖥️ **[ProxmoxVMSetupGuide.md](ProxmoxVMSetupGuide.md)** — install Proxmox VE and provision the three Ubuntu VMs.
+2. 🐳 **[DockerInstallSetupGuide.md](DockerInstallSetupGuide.md)** — install Docker on `docker-ubuntu` and create the shared `proxy-network` bridge.
+3. 🚦 **[TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md)** — deploy Portainer and Traefik with automated subfolder routing.
+4. 🔒 **[CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md)** — create the tunnel and run `cloudflared`.
+5. ⚙️ **[GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md)** — register the self-hosted runner as a systemd service.
+6. ➕ **Add your first app** — see the next section.
 
 > ⏱️ Tip: take a Proxmox snapshot before each major step. If something breaks, you can roll back in seconds.
 
 ---
 
+## 📘 Setup guides
+
+| # | Guide | Covers |
+|---|-------|--------|
+| 1 | [ProxmoxVMSetupGuide.md](ProxmoxVMSetupGuide.md) | Proxmox install, ISO upload, VM creation, networking, snapshots |
+| 2 | [DockerInstallSetupGuide.md](DockerInstallSetupGuide.md) | Docker Engine + Compose plugin install, `proxy-network` bridge, non-root user |
+| 3 | [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md) | Portainer install, Traefik stack, dynamic middleware, subfolder routing |
+| 4 | [CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md) | Cloudflare Zero Trust tunnel, wildcard hostname, `cloudflared` as a service |
+| 5 | [GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md) | Self-hosted runner registration, systemd service, security hardening |
+
+---
+
 ## ➕ Adding a new app
 
-The 80% case is delightfully simple:
+The 80% case is delightfully simple. Two routing patterns are supported:
 
-1. Push a new `docker-compose.yml` to this repo for your app (see [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md) Step 4 for the label scheme).
-2. Add a GitHub Actions workflow (or extend the existing one) that:
-   - Runs `on: push` for the relevant path.
-   - Uses `runs-on: self-hosted`.
-   - Calls `docker compose up -d --build` in the app's directory **or** hits the Portainer webhook for that stack.
-3. Wait for the runner to pick up the job.
-4. Visit `https://yourdomain.com/<service-name>` — Traefik will route automatically using the `defaultRule` that maps the compose **service name** to the URL path prefix.
+### Subfolder routing (default) — `yourdomain.com/<service-name>`
 
-**Minimum Docker labels** for a new app:
+Use this when the app is happy living under a path prefix. Copy [`stacks/example-app/docker-compose.yml`](stacks/example-app/docker-compose.yml) as your starting point.
+
+### Per-host routing — `app.yourdomain.com`
+
+Use this when an app generates absolute links to `/static/...`, hard-codes URLs, or you just prefer subdomains. Copy [`stacks/example-app-host/docker-compose.yml`](stacks/example-app-host/docker-compose.yml) instead.
+
+### Either way
+
+1. Push the new `docker-compose.yml` (and any source code) to this repo under `stacks/<your-app>/`.
+2. The deploy workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) picks it up automatically on push to `main`.
+3. Visit your new URL and confirm Traefik routes the request.
+
+**Minimum Docker labels** for a subfolder-routed app:
 
 ```yaml
 labels:
@@ -212,7 +328,7 @@ labels:
   - "traefik.http.services.<service-name>.loadbalancer.server.port=<container-port>"
 ```
 
-That's it. No DNS changes, no Cloudflare changes, no Traefik config edits.
+No DNS changes, no Cloudflare changes, no Traefik config edits.
 
 ---
 
@@ -280,9 +396,3 @@ This is currently a personal homelab project, but if you find a typo, a smarter 
 1. Keep secrets and real domains out of commits (the included setup uses `yourdomain.com` as a placeholder for a reason 😉).
 2. Test changes on a snapshot / throwaway VM before opening a PR.
 3. Update both the README and the corresponding `*SetupGuide.md` when behaviour changes.
-
----
-
-## 📝 License
-
-TBD — add a `LICENSE` file (MIT or Apache-2.0 are common picks for infra-docs repos).
