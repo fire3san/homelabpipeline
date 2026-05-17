@@ -181,9 +181,11 @@ A single source of truth for every port that listens anywhere in the homelab. An
 | `9443` | TCP | `docker-ubuntu` → Portainer container | Portainer Web UI (HTTPS) | LAN only | Self-signed cert; access via `https://<docker-ubuntu>:9443`. |
 | `8000` | TCP | `docker-ubuntu` → Portainer container | Portainer Edge agent tunnel | LAN only | Optional; only needed if you use Edge agents. |
 | `8081+` | TCP | `docker-ubuntu` → app containers | Per-app LAN bypass | LAN only (optional) | Handy for local testing/safety net; not required for the public flow. |
+| `8006` | TCP | Proxmox host (`pve.lab`) | Proxmox VE API | LAN only | PVE Exporter scrapes metrics from this endpoint; also used for Proxmox web UI. |
 | `9090` | TCP | `docker-ubuntu` → Prometheus container | Prometheus Web UI | LAN only | Metrics browser; not exposed via tunnel. |
-| `3030` | TCP | `docker-ubuntu` → Grafana container | Grafana Dashboards | LAN only | Mapped from container 3000; not exposed via tunnel. |
 | `9221` | TCP | `docker-ubuntu` → PVE Exporter container | Proxmox metrics endpoint | Docker internal only | Scraped by Prometheus over `proxy-network`; no host port mapping needed. |
+| `3000` | TCP | Grafana container (internal) | Grafana listen port | Container only | Not exposed on the host; mapped to host port `3030`. |
+| `3030` | TCP | `docker-ubuntu` → Grafana container | Grafana Dashboards | LAN only | Host port mapped from container `3000`; not exposed via tunnel. |
 | `*/443` | TCP | `cloudflared` VM → Cloudflare | Outbound tunnel | Outbound to internet | The only sustained connection leaving the homelab to the public internet. |
 | `*/443` | TCP | GitHub Runner container → GitHub | Job polling | Outbound to internet | HTTPS poll; no inbound rule needed. |
 

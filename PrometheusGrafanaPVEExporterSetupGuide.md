@@ -213,11 +213,13 @@ Back in the Proxmox UI: `docker-ubuntu` → **Snapshots** → **Take Snapshot** 
 
 | Port | Proto | Where | Reachable from | Notes |
 |------|-------|-------|----------------|-------|
-| `9090` | TCP | Prometheus container | LAN only | Prometheus Web UI and query API. |
-| `3030` | TCP | Grafana container (maps to container port 3000) | LAN only | Grafana dashboards. Default login: `admin` / `admin` (change on first visit). |
+| `8006` | TCP | PVE Exporter container → Proxmox host (`192.168.1.10`) | LAN only | Proxmox VE API. PVE Exporter scrapes metrics from this endpoint. Must be reachable from the `proxy-network` Docker bridge. |
+| `9090` | TCP | Prometheus container (host port `9090`) | LAN only | Prometheus Web UI and query API. |
 | `9221` | TCP | PVE Exporter container | Docker internal only | Scraped by Prometheus over `proxy-network`. No host port mapping needed. |
+| `3000` | TCP | Grafana container (internal) | — | Grafana's default listen port inside the container. |
+| `3030` | TCP | `docker-ubuntu` host port (maps to container `3000`) | LAN only | Grafana dashboards in the browser. Default login: `admin` / `admin` (change on first visit). |
 
-> 🛡️ All three services have `traefik.enable=false` and are **never exposed via the Cloudflare Tunnel**. Access them only from the LAN.
+> 🛡️ All three monitoring services have `traefik.enable=false` and are **never exposed via the Cloudflare Tunnel**. Access them only from the LAN. Port `8006` is already open on the Proxmox host — the PVE Exporter container reaches it through the Docker host's network via `proxy-network`.
 
 ---
 
