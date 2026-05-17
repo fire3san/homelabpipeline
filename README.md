@@ -34,7 +34,7 @@ This is a **fully automated homelab deployment pipeline** with two halves:
 
 | Half | Purpose | Tools |
 |------|---------|-------|
-| **CI/CD pipeline** | Turns code commits into running Docker containers, with no manual `ssh` or `docker build` steps. | GitHub Actions, Self-Hosted Runner, Portainer |
+| **CI/CD pipeline** | Turns code commits into running Docker containers, with no manual `ssh` or `docker build` steps. | GitHub Actions, Runner (myoung34), Portainer |
 | **Traffic pipeline** | Exposes those containers to the public internet **without opening any inbound ports**, using a Cloudflare Tunnel and a Traefik reverse proxy. | Cloudflare Zero Trust, `cloudflared`, Traefik v3 |
 
 The whole thing runs on a single Proxmox host split into purpose-built VMs, so each component is isolated and easy to rebuild.
@@ -64,7 +64,12 @@ flowchart LR
     subgraph Homelab["🏠 Proxmox Host (LAN)"]
         direction TB
         Claw["🤖 VM: openclaw-ubuntu<br/>AI coding agent"]
-        Runner["⚙️ VM: docker-ubuntu<br/>Self-Hosted Runner +<br/>Portainer + Traefik + Apps"]
+        subgraph DockerVM["⚙️ VM: docker-ubuntu"]
+            Runner["🏃 GitHub Runner<br/>(myoung34 container)"]
+            Portainer["🔲 Portainer"]
+            Traefik["🚦 Traefik"]
+            Apps["📦 Apps"]
+        end
         Tunnel["🔒 VM: cloudflared<br/>Tunnel client"]
     end
 
@@ -72,7 +77,8 @@ flowchart LR
     GH -. "queue job (outbound poll)" .-> Runner
     User --> CF
     CF -- "outbound tunnel" --> Tunnel
-    Tunnel --> Runner
+    Tunnel --> Traefik
+    Traefik --> Apps
 ```
 
 **Key idea:** all arrows entering the homelab are **outbound-initiated** by the homelab itself. The router never sees an inbound connection request.
@@ -102,11 +108,13 @@ flowchart TB
             VMC["🤖 openclaw-ubuntu<br/>192.168.1.11"]
             VMD["⚙️ docker-ubuntu<br/>192.168.1.12"]
             VMT["🔒 cloudflared<br/>192.168.1.13"]
-            subgraph DOCK["🐳 Docker on docker-ubuntu — proxy-network bridge — 172.18.0.0/16"]
+            subgraph DOCK["🐳 Docker on docker-ubuntu — 172.18.0.0/16"]
                 direction LR
-                TRA["🚦 Traefik<br/>172.18.0.2"]
-                APP1["📦 App 1<br/>172.18.0.3"]
-                APP2["📦 App 2<br/>172.18.0.4"]
+                RUN["🏃 GitHub Runner<br/>(myoung34)"]
+                TRA["🚦 Traefik<br/>proxy-network"]
+                POR["🔲 Portainer"]
+                APP1["📦 App 1<br/>proxy-network"]
+                APP2["📦 App 2<br/>proxy-network"]
             end
             VMD --- DOCK
         end
@@ -119,7 +127,7 @@ flowchart TB
     TRA --> APP2
 
     VMC -- "git push (outbound 443)" --> GHC
-    VMD -- "runner poll (outbound 443)" --> GHC
+    RUN -- "runner poll (outbound 443)" --> GHC
 
     Admin -- "SSH :22 / HTTPS :9443" --> VMD
     Admin -- "SSH :22" --> VMC
@@ -149,20 +157,20 @@ flowchart TB
 flowchart TD
     A["🤖 AI agent writes code,<br/>Dockerfile, docker-compose.yml"] --> B["📤 git push to GitHub"]
     B --> C["⚡ GitHub Actions queues<br/>job tagged runs-on: self-hosted"]
-    C --> D["🛰️ Self-Hosted Runner<br/>(on LAN, polls outbound)"]
+    C --> D["🏃 GitHub Runner container<br/>(myoung34, polls outbound)"]
     D --> E["📥 git pull repository"]
     E --> F["🐳 docker build locally"]
     F --> G["🚢 Portainer refreshes<br/>the application stack"]
     G --> H["✅ Container running on<br/>proxy-network"]
 ```
 
-**How it works:**
+**How it works (plain English):**
 
 1. The AI agent commits application code, a `Dockerfile`, and a `docker-compose.yml` to this repo.
 2. GitHub Actions sees the new commit and queues a deployment job tagged `runs-on: self-hosted`.
-3. A local **GitHub Self-Hosted Runner** sitting on the LAN polls GitHub *outbound* for jobs. Because the poll is outbound, no inbound firewall rule is needed.
+3. A **GitHub Runner container** (based on `myoung34/github-runner`) on the LAN polls GitHub *outbound* for jobs. Because the poll is outbound, no inbound firewall rule is needed.
 4. The runner pulls the latest code and runs `docker build` locally — your code never has to leave the homelab to be built.
-5. The runner talks to **Portainer** (via its local API/webhook or the Docker socket) to update or recreate the application stack.
+5. The runner talks to **Portainer** (via its local API) to update or recreate the application stack.
 6. Done — the new container is running on the shared `proxy-network` bridge, ready for Traefik to discover it.
 
 ### 2. Traffic pipeline (internet → container)
@@ -198,7 +206,7 @@ flowchart TD
 | AI agent | **AI coding agent** (running on a dedicated VM) | Writes app code, Dockerfiles, compose files, and commits them. | Isolated from production containers; can be torn down without risk. |
 | Source control | **GitHub** | Public/private repo of record. | Free Actions minutes for self-hosted runners. |
 | CI | **GitHub Actions** | Triggers deployment jobs on push/tag. | Tight integration with GitHub; supports self-hosted runners. |
-| Build server | **GitHub Self-Hosted Runner** | Pulls code and builds Docker images on the LAN. | Keeps source/build artefacts on-prem; outbound-only. |
+| Build server | **GitHub Runner** (myoung34) | Pulls code and builds Docker images on the LAN. Runs as a Docker container with Docker socket access. | Keeps source/build artefacts on-prem; outbound-only; container-native. |
 | Container engine | **Docker** | Runs every application as a container. | Industry standard; works seamlessly with compose + Portainer. |
 | Container UI | **Portainer CE** | Manages stacks, networks, volumes through a web UI. | One-click stack redeploys; great for ops while learning. |
 | Reverse proxy | **Traefik v3** | Routes HTTP traffic to containers by labels; strips path prefixes. | Auto-discovers containers — no per-app proxy config to maintain. |
@@ -209,7 +217,7 @@ flowchart TD
 | VM | Network | Role | Inbound ports needed |
 |----|---------|------|----------------------|
 | `openclaw-ubuntu` | LAN only | Runs the AI coding agent. | None (uses SSH + git outbound) |
-| `docker-ubuntu` | LAN only | Hosts Docker, Portainer, Traefik, all app containers, and the GitHub runner. | `:80` from `cloudflared` only; `:9443` Portainer & `:8080` Traefik dashboard on LAN |
+| `docker-ubuntu` | LAN only | Hosts Docker, Portainer, Traefik, all app containers, and the GitHub Runner container. | `:80` from `cloudflared` only; `:9443` Portainer & `:8080` Traefik dashboard on LAN |
 | `cloudflared` | LAN only | Runs the tunnel client. | None — all traffic is outbound to Cloudflare |
 
 ---
@@ -228,7 +236,7 @@ A single source of truth for every port that listens anywhere in the homelab. An
 | `8000` | TCP | `docker-ubuntu` → Portainer container | Portainer Edge agent tunnel | LAN only | Optional; only needed if you use Edge agents. |
 | `8081+` | TCP | `docker-ubuntu` → app containers | Per-app LAN bypass | LAN only (optional) | Handy for local testing/safety net; not required for the public flow. |
 | `*/443` | TCP | `cloudflared` VM → Cloudflare | Outbound tunnel | Outbound to internet | The only sustained connection leaving the homelab to the public internet. |
-| `*/443` | TCP | Self-Hosted Runner → GitHub | Job polling | Outbound to internet | HTTPS poll; no inbound rule needed. |
+| `*/443` | TCP | GitHub Runner container → GitHub | Job polling | Outbound to internet | HTTPS poll; no inbound rule needed. |
 
 > 🛡️ Rule of thumb: if a port shows **"Reachable from: LAN only"**, make sure your router's firewall (or `ufw` on the VM) drops that port from the WAN side, and never add a Cloudflare public hostname pointing at it.
 
@@ -239,6 +247,7 @@ A single source of truth for every port that listens anywhere in the homelab. An
 ```
 homelabpipeline/
 ├── README.md                            ← You are here
+├── deployment-guide.md                   ← Vite/SPA multi-environment base-path guide
 ├── ProxmoxVMSetupGuide.md               ← Provision the three Ubuntu VMs on Proxmox
 ├── DockerInstallSetupGuide.md           ← Install Docker + create the proxy-network
 ├── TraefikPortainerSetupGuide.md        ← Deploy Portainer + Traefik (auto subfolder routing)
@@ -246,7 +255,9 @@ homelabpipeline/
 ├── GitHubRunnerSetupGuide.md            ← Register the self-hosted GitHub runner
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml                   ← Example self-hosted deploy workflow
+│       └── deploy.yml                   ← Deploys infra stacks from stacks/ on push to main
+├── templates/
+│   └── homelabdeploy.yml                ← Copy into APP REPOS for zero-touch Portainer deployment
 └── stacks/
     ├── traefik/
     │   ├── docker-compose.yml           ← Traefik v3 stack (subfolder routing)
@@ -255,8 +266,10 @@ homelabpipeline/
     │   └── docker-compose.yml           ← Portainer CE stack
     ├── example-app/
     │   └── docker-compose.yml           ← Subfolder routing variant (yourdomain.com/example-app)
-    └── example-app-host/
-        └── docker-compose.yml           ← Per-host routing variant (app.yourdomain.com)
+    ├── example-app-host/
+    │   └── docker-compose.yml           ← Per-host routing variant (app.yourdomain.com)
+    └── github-runner/
+        └── docker-compose.yml           ← myoung34 GitHub Actions runner (Docker-based)
 ```
 
 > 💡 Keep the root directory navigable — one folder per concern, one guide per major component.
@@ -282,7 +295,7 @@ Work through the setup guides in this order. Each one is self-contained and buil
 2. 🐳 **[DockerInstallSetupGuide.md](DockerInstallSetupGuide.md)** — install Docker on `docker-ubuntu` and create the shared `proxy-network` bridge.
 3. 🚦 **[TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md)** — deploy Portainer and Traefik with automated subfolder routing.
 4. 🔒 **[CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md)** — create the tunnel and run `cloudflared`.
-5. ⚙️ **[GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md)** — register the self-hosted runner as a systemd service.
+5. ⚙️ **[GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md)** — deploy the myoung34 GitHub Runner as a Docker container.
 6. ➕ **Add your first app** — see the next section.
 
 > ⏱️ Tip: take a Proxmox snapshot before each major step. If something breaks, you can roll back in seconds.
@@ -297,7 +310,8 @@ Work through the setup guides in this order. Each one is self-contained and buil
 | 2 | [DockerInstallSetupGuide.md](DockerInstallSetupGuide.md) | Docker Engine + Compose plugin install, `proxy-network` bridge, non-root user |
 | 3 | [TraefikPortainerSetupGuide.md](TraefikPortainerSetupGuide.md) | Portainer install, Traefik stack, dynamic middleware, subfolder routing |
 | 4 | [CloudflareTunnelSetupGuide.md](CloudflareTunnelSetupGuide.md) | Cloudflare Zero Trust tunnel, wildcard hostname, `cloudflared` as a service |
-| 5 | [GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md) | Self-hosted runner registration, systemd service, security hardening |
+| 5 | [GitHubRunnerSetupGuide.md](GitHubRunnerSetupGuide.md) | myoung34 Docker-based runner deployment, token setup, Docker socket mounting |
+| 6 | [deployment-guide.md](deployment-guide.md) | Vite/SPA base-path config for GitHub Pages + Traefik + direct IP access |
 
 ---
 
@@ -316,8 +330,11 @@ Use this when an app generates absolute links to `/static/...`, hard-codes URLs,
 ### Either way
 
 1. Push the new `docker-compose.yml` (and any source code) to this repo under `stacks/<your-app>/`.
-2. The deploy workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) picks it up automatically on push to `main`.
-3. Visit your new URL and confirm Traefik routes the request.
+2. The infra deploy workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) picks it up automatically on push to `main`.
+3. For **app repos** (with their own Dockerfile), copy [`templates/homelabdeploy.yml`](templates/homelabdeploy.yml) into `.github/workflows/` in that repo.
+4. Visit your new URL and confirm Traefik routes the request.
+
+> **SPA apps:** If your app is a Vite/React SPA that needs to work behind a subfolder path, follow the [deployment guide](deployment-guide.md) to configure `base` path, nginx aliases, and Traefik labels correctly.
 
 **Minimum Docker labels** for a subfolder-routed app:
 
@@ -354,7 +371,7 @@ This project uses a **zero-trust ingress** model instead:
 
 ### Things to keep in mind
 
-- 🔑 **Rotate the runner token** if you ever rebuild `docker-ubuntu`.
+- 🔑 **Rotate the runner token** if you ever rebuild `docker-ubuntu` or recreate the container.
 - 🪪 **Treat the Cloudflare Tunnel credentials file as a secret** — it's effectively a key to your homelab.
 - 🧯 **Don't expose the Docker socket** to app containers. Only Traefik and Portainer should ever see it.
 - 🆙 **Pin or auto-update images** — `traefik:latest` is convenient, but for production you may prefer a pinned minor version.
@@ -368,7 +385,7 @@ This project uses a **zero-trust ingress** model instead:
 |---------|----------------------|
 | 🚫 `404 page not found` from Traefik | Open `http://<docker-ubuntu>:8080/dashboard/` on the LAN. If your router isn't listed, the labels are wrong or the container isn't on `proxy-network`. |
 | 🔌 Traefik logs say `client version is too old` | Update the Traefik image to `traefik:latest` (or v3.6+). |
-| ❌ Runner shows `offline` in GitHub | SSH into `docker-ubuntu`, check `sudo systemctl status actions.runner.*`. Restart if dead. |
+| ❌ Runner shows `offline` in GitHub | `docker ps` on `docker-ubuntu` to check if the `github-runner` container is running. Restart with `docker compose up -d` from `stacks/github-runner/`. |
 | 🌐 Cloudflare returns `Error 1033` / `530` | The `cloudflared` daemon isn't running or can't reach `docker-ubuntu:80`. Check `journalctl -u cloudflared -f`. |
 | 🔁 Stack redeploys but URL still 404s | Confirm the compose **service name** matches the `traefik.http.routers.<name>` label, and that the container is on `proxy-network` (not the default stack network). |
 | 🔑 `permission denied` on `/var/run/docker.sock` | Container needs to be in the `docker` group on the host, or mount the socket explicitly. |
@@ -382,7 +399,7 @@ This project uses a **zero-trust ingress** model instead:
 
 - **Reverse proxy** — a server that accepts incoming requests and forwards them to the right backend (here: Traefik).
 - **Stack** — a Portainer term for one or more containers managed together via a `docker-compose.yml`.
-- **Self-hosted runner** — a GitHub Actions worker that runs on *your* hardware instead of in GitHub's cloud.
+- **Self-hosted runner** — a GitHub Actions worker that runs on *your* hardware instead of in GitHub's cloud. Here, it's a Docker container using the `myoung34/github-runner` image.
 - **Cloudflare Tunnel** — an outbound-only persistent connection from your network to Cloudflare's edge, replacing port forwarding.
 - **Zero-trust** — a security model where no network location is implicitly trusted; every request is authenticated/authorised.
 - **`proxy-network`** — the named Docker bridge network that connects Traefik to all app containers.

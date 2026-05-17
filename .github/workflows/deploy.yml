@@ -1,6 +1,13 @@
 name: Deploy stack
 
-# Triggers when a stack changes on main. Adjust the path filter to match your layout.
+# ==========================================================================
+# This workflow deploys INFRA stacks from this repo (anything under stacks/).
+#
+# For APP REPOS (each with their own Dockerfile + compose file), copy the
+# template at templates/homelabdeploy.yml into that repo's .github/workflows/
+# instead. Do NOT add app-specific build logic here.
+# ==========================================================================
+
 on:
   push:
     branches: [main]

@@ -1,0 +1,35 @@
+# GitHub Actions self-hosted runner (myoung34/runner)
+#
+# This runs the runner as a Docker container alongside Traefik and Portainer.
+# It does NOT need to be on the proxy-network since it has no inbound traffic.
+#
+# Setup:
+#   1. Go to GitHub → repo Settings → Actions → Runners → New self-hosted runner
+#   2. Copy the registration token
+#   3. Create a .env file next to this compose file:
+#        RUNNER_TOKEN=<paste-token-here>
+#        RUNNER_REPOSITORY_URL=https://github.com/<you>/homelabpipeline
+#   4. docker compose up -d
+#
+# The token is only needed on first start — the runner registers itself and
+# persists the credentials in the named volume.
+
+services:
+  github-runner:
+    image: myoung34/github-runner:latest
+    container_name: github-runner
+    restart: unless-stopped
+    environment:
+      - RUNNER_TOKEN=${RUNNER_TOKEN}
+      - RUNNER_REPOSITORY_URL=${RUNNER_REPOSITORY_URL}
+      - RUNNER_NAME=github-runner
+      - RUNNER_LABELS=self-hosted,linux,x64,docker
+      - RUNNER_WORKDIR=/tmp/runner/work
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-work:/tmp/runner/work
+    # No network_mode or proxy-network needed — the runner only reaches
+    # GitHub outbound and the Docker socket for local builds.
+
+volumes:
+  runner-work:
